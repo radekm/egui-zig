@@ -2,6 +2,8 @@ const std = @import("std");
 const core = @import("mach").core;
 const gpu = core.gpu;
 
+const color = @import("epaint/color.zig");
+
 const Vertex = extern struct {
     pos: @Vector(2, f32),
     col: @Vector(3, f32),
