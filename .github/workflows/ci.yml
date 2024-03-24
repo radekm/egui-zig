@@ -1,0 +1,58 @@
+# Taken from hexops/mach-gpu/blob/main/.github/workflows/ci.yml
+
+name: CI
+on:
+  - push
+jobs:
+  x86_64-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: 'true'
+      - name: Setup Zig
+        run: |
+          sudo apt install xz-utils
+          sudo sh -c 'wget -c https://pkg.machengine.org/zig/zig-linux-x86_64-0.12.0-dev.3180+83e578a18.tar.xz -O - | tar -xJ --strip-components=1 -C /usr/local/bin'
+      - name: build
+        run: zig build
+      - name: test
+        run: zig build test
+  x86_64-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Set git to use LF
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: 'true'
+      - name: Setup Zig
+        run: |
+          $ProgressPreference = 'SilentlyContinue'
+          Invoke-WebRequest -Uri "https://pkg.machengine.org/zig/zig-windows-x86_64-0.12.0-dev.3180+83e578a18.zip" -OutFile "C:\zig.zip"
+          cd C:\
+          7z x zig.zip
+          Add-Content $env:GITHUB_PATH "C:\zig-windows-x86_64-0.12.0-dev.3180+83e578a18\"
+      - name: build
+        run: zig build
+      - name: test
+        run: zig build test
+  x86_64-macos:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: 'true'
+      - name: Setup Zig
+        run: |
+          brew install xz
+          sudo sh -c 'wget -c https://pkg.machengine.org/zig/zig-macos-x86_64-0.12.0-dev.3180+83e578a18.tar.xz -O - | tar -xJ --strip-components=1 -C /usr/local/bin'
+      - name: build
+        run: zig build
+      - name: test
+        run: zig build test
