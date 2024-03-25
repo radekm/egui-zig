@@ -50,3 +50,15 @@ The third problem is that Zig compiler doesn't typecheck the code until it's use
 We have finished our translation but very likely Zig code is full of problems
 which will be detected after we use it. We must use each function in each type instantiation.
 It's like C++ templates without concepts.
+
+Additional note: The third problem can be partially remedied by writing following test:
+
+```zig
+const color = @import("epaint/color.zig");
+
+test "force typechecking" {
+    std.testing.refAllDeclsRecursive(color);
+}
+```
+
+Unfortunately it won't test whether code makes sense for all imaginable comptime arguments.

@@ -3,15 +3,15 @@ const std = @import("std");
 /// gamma [0, 255] -> linear [0, 1].
 pub fn linearF32FromGammaU8(s: u8) f32 {
     return if (s <= 10)
-        @as(f32, s) / 3294.6
+        @as(f32, @floatFromInt(s)) / 3294.6
     else
-        std.powf((@as(f32, s) + 14.025) / 269.025, 2.4);
+        std.math.pow(f32, (@as(f32, @floatFromInt(s)) + 14.025) / 269.025, 2.4);
 }
 
 /// linear [0, 255] -> linear [0, 1].
 /// Useful for alpha-channel.
 pub fn linearF32FromLinearU8(a: u8) f32 {
-    return @as(f32, a) / 255.0;
+    return @as(f32, @floatFromInt(a)) / 255.0;
 }
 
 pub fn linearU8FromLinearF32(a: f32) u8 {
@@ -31,7 +31,7 @@ pub fn gammaU8FromLinearF32(l: f32) u8 {
     else if (l <= 0.0031308)
         fastRound(3294.6 * l)
     else if (l <= 1.0)
-        fastRound(269.025 * l.powf(1.0 / 2.4) - 14.025)
+        fastRound(269.025 * std.math.pow(f32, l, 1.0 / 2.4) - 14.025)
     else
         255;
 }
@@ -95,9 +95,9 @@ pub const Color32 = extern struct {
 
     /// From `sRGBA` WITHOUT premultiplied alpha.
     pub fn fromRgbaUnmultiplied(red: u8, green: u8, blue: u8, alpha: u8) Color32 {
-        if (a == 255) {
+        if (alpha == 255) {
             return fromRgb(red, green, blue);
-        } else if (a == 0) {
+        } else if (alpha == 0) {
             return TRANSPARENT;
         } else {
             const r_lin = linearF32FromGammaU8(red);
@@ -120,7 +120,7 @@ pub const Color32 = extern struct {
     }
 
     pub fn fromWhiteAlpha(alpha: u8) Color32 {
-        return Rgba.fromWhiteAlpha(linearF32FromLinearU8(alpha)).toColor32()();
+        return Rgba.fromWhiteAlpha(linearF32FromLinearU8(alpha)).toColor32();
     }
 
     pub fn fromAdditiveLuminance(l: u8) Color32 {
@@ -174,10 +174,10 @@ pub const Color32 = extern struct {
         std.debug.assert(0.0 <= factor and factor <= 1.0);
 
         return .{ .rgba = [_]u8{
-            fastRound(@as(f32, self.r()) * factor),
-            fastRound(@as(f32, self.g()) * factor),
-            fastRound(@as(f32, self.b()) * factor),
-            fastRound(@as(f32, self.a()) * factor),
+            fastRound(@as(f32, @floatFromInt(self.r())) * factor),
+            fastRound(@as(f32, @floatFromInt(self.g())) * factor),
+            fastRound(@as(f32, @floatFromInt(self.b())) * factor),
+            fastRound(@as(f32, @floatFromInt(self.a())) * factor),
         } };
     }
     /// Multiply with 0.5 to make color half as opaque in linear space.
@@ -196,11 +196,11 @@ pub const Color32 = extern struct {
     /// Use this with great care! In almost all cases, you want to convert to [`crate::Rgba`] instead
     /// in order to obtain linear space color values.
     pub fn toNormalizedGammaF32(self: Color32) [4]f32 {
-        return [_]u8{
-            @as(f32, self.r()) / 255.0,
-            @as(f32, self.g()) / 255.0,
-            @as(f32, self.b()) / 255.0,
-            @as(f32, self.a()) / 255.0,
+        return [_]f32{
+            @as(f32, @floatFromInt(self.r())) / 255.0,
+            @as(f32, @floatFromInt(self.g())) / 255.0,
+            @as(f32, @floatFromInt(self.b())) / 255.0,
+            @as(f32, @floatFromInt(self.a())) / 255.0,
         };
     }
 
@@ -226,14 +226,14 @@ pub const Rgba = extern struct {
     pub const BLUE: Rgba = fromRgb(0.0, 0.0, 1.0);
 
     pub fn fromRgbaPremultiplied(red: f32, green: f32, blue: f32, alpha: f32) Rgba {
-        return .{ .rgba = [_]u8{ red, green, blue, alpha } };
+        return .{ .rgba = [_]f32{ red, green, blue, alpha } };
     }
 
     pub fn fromRgbaUnmultiplied(red: f32, green: f32, blue: f32, alpha: f32) Rgba {
-        return .{ .rgba = [_]u8{ red * alpha, green * alpha, blue * alpha, alpha } };
+        return .{ .rgba = [_]f32{ red * alpha, green * alpha, blue * alpha, alpha } };
     }
 
-    pub fn fromSrgbaPremultiplied(red: f32, green: f32, blue: f32, alpha: f32) Rgba {
+    pub fn fromSrgbaPremultiplied(red: u8, green: u8, blue: u8, alpha: u8) Rgba {
         const r2 = linearF32FromGammaU8(red);
         const g2 = linearF32FromGammaU8(green);
         const b2 = linearF32FromGammaU8(blue);
@@ -325,7 +325,7 @@ pub const Rgba = extern struct {
 
     /// Premultiplied RGBA
     pub fn toArray(self: Rgba) [4]f32 {
-        return [_]u8{ self.r(), self.g(), self.b(), self.a() };
+        return [_]f32{ self.r(), self.g(), self.b(), self.a() };
     }
 
     /// unmultiply the alpha
