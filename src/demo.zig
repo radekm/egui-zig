@@ -3,9 +3,15 @@ const core = @import("mach").core;
 const gpu = core.gpu;
 
 const color = @import("epaint/color.zig");
+const pos2 = @import("emath/pos2.zig");
+const vec2 = @import("emath/vec2.zig");
+const vec2b = @import("emath/vec2b.zig");
 
 test "force typechecking" {
     std.testing.refAllDeclsRecursive(color);
+    std.testing.refAllDeclsRecursive(pos2);
+    std.testing.refAllDeclsRecursive(vec2);
+    std.testing.refAllDeclsRecursive(vec2b);
 }
 
 const Vertex = extern struct {
