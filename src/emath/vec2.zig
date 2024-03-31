@@ -6,7 +6,7 @@ const std = @import("std");
 /// emath represents positions using [`crate::Pos2`].
 ///
 /// Normally the units are points (logical pixels).
-const T = @Vector(2, f32);
+pub const T = @Vector(2, f32);
 
 pub const X = T{ 1, 0 };
 pub const Y = T{ 0, 1 };

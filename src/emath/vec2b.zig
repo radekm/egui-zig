@@ -1,5 +1,5 @@
 /// Two bools, one for each axis (X and Y).
-const T = @Vector(2, bool);
+pub const T = @Vector(2, bool);
 
-const FALSE = T{ false, false };
-const TRUE = T{ true, true };
+pub const FALSE = T{ false, false };
+pub const TRUE = T{ true, true };

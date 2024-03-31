@@ -2,16 +2,22 @@ const std = @import("std");
 const core = @import("mach").core;
 const gpu = core.gpu;
 
-const color = @import("epaint/color.zig");
-const pos2 = @import("emath/pos2.zig");
-const vec2 = @import("emath/vec2.zig");
-const vec2b = @import("emath/vec2b.zig");
+const Color = @import("epaint/Color.zig");
+const Pos2 = @import("emath/Pos2.zig");
+const Rangef = @import("emath/Rangef.zig");
+const Rect = @import("emath/Rect.zig");
+const Rot2 = @import("emath/Rot2.zig");
+const Vec2 = @import("emath/Vec2.zig");
+const Vec2b = @import("emath/Vec2b.zig");
 
 test "force typechecking" {
-    std.testing.refAllDeclsRecursive(color);
-    std.testing.refAllDeclsRecursive(pos2);
-    std.testing.refAllDeclsRecursive(vec2);
-    std.testing.refAllDeclsRecursive(vec2b);
+    std.testing.refAllDeclsRecursive(Color);
+    std.testing.refAllDeclsRecursive(Pos2);
+    std.testing.refAllDeclsRecursive(Rangef);
+    std.testing.refAllDeclsRecursive(Rect);
+    std.testing.refAllDeclsRecursive(Rot2);
+    std.testing.refAllDeclsRecursive(Vec2);
+    std.testing.refAllDeclsRecursive(Vec2b);
 }
 
 const Vertex = extern struct {
