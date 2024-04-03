@@ -126,6 +126,11 @@ pub const Color32 = extern struct {
     pub fn fromAdditiveLuminance(l: u8) Color32 {
         return .{ .rgba = [_]u8{ l, l, l, 0 } };
     }
+
+    pub fn eql(self: Color32, other: Color32) bool {
+        return std.mem.eql(u8, &self.rgba, &other.rgba);
+    }
+
     pub fn isOpaque(self: Color32) bool {
         return self.a() == 255;
     }

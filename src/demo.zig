@@ -2,7 +2,6 @@ const std = @import("std");
 const core = @import("mach").core;
 const gpu = core.gpu;
 
-const Color = @import("epaint/Color.zig");
 const Pos2 = @import("emath/Pos2.zig");
 const Rangef = @import("emath/Rangef.zig");
 const Rect = @import("emath/Rect.zig");
@@ -10,28 +9,43 @@ const Rot2 = @import("emath/Rot2.zig");
 const Vec2 = @import("emath/Vec2.zig");
 const Vec2b = @import("emath/Vec2b.zig");
 
+const Color = @import("epaint/Color.zig");
+const Mesh = @import("epaint/Mesh.zig");
+const Shape = @import("epaint/Shape.zig");
+const Stroke = @import("epaint/Stroke.zig");
+const Tessellator = @import("epaint/Tessellator.zig");
+const Texture = @import("epaint/Texture.zig");
+const TextureAtlas = @import("epaint/TextureAtlas.zig");
+
 test "force typechecking" {
-    std.testing.refAllDeclsRecursive(Color);
     std.testing.refAllDeclsRecursive(Pos2);
     std.testing.refAllDeclsRecursive(Rangef);
     std.testing.refAllDeclsRecursive(Rect);
     std.testing.refAllDeclsRecursive(Rot2);
     std.testing.refAllDeclsRecursive(Vec2);
     std.testing.refAllDeclsRecursive(Vec2b);
+
+    std.testing.refAllDeclsRecursive(Color);
+    std.testing.refAllDeclsRecursive(Mesh);
+    std.testing.refAllDeclsRecursive(Shape);
+    std.testing.refAllDeclsRecursive(Stroke);
+    std.testing.refAllDeclsRecursive(Tessellator);
+    std.testing.refAllDeclsRecursive(Texture);
+    std.testing.refAllDeclsRecursive(TextureAtlas);
 }
 
 const Vertex = extern struct {
     pos: @Vector(2, f32),
     col: @Vector(3, f32),
 };
-const vertices = [_]Vertex{
+var vertices: []const Vertex = &.{
     .{ .pos = .{ -0.5, -0.5 }, .col = .{ 1, 0, 0 } }, // left bottom
     .{ .pos = .{ 0.5, -0.5 }, .col = .{ 0, 1, 0 } }, // right bottom
     .{ .pos = .{ 0.5, 0.5 }, .col = .{ 0, 0, 1 } }, // right top
     .{ .pos = .{ -0.5, 0.5 }, .col = .{ 1, 1, 0.5 } }, // left top
     .{ .pos = .{ 0, 0.9 }, .col = .{ 1, 1, 0.5 } }, // middle completely top
 };
-const index_data = [_]u32{
+var index_data: []const u32 = &.{
     0, 1, 2,
     2, 3, 0,
     2, 3, 4,
@@ -51,6 +65,26 @@ pub fn init(app: *App) !void {
 
     const shader_module = core.device.createShaderModuleWGSL("sh.wgsl", @embedFile("sh.wgsl"));
     defer shader_module.release();
+
+    var mesh = Mesh.init(gpa.allocator(), Texture.Id.DEFAULT);
+    defer mesh.deinit();
+    var tessellated_vertices = std.ArrayList(Vertex).init(gpa.allocator());
+    defer tessellated_vertices.deinit();
+    {
+        var tessellator = Tessellator.init(gpa.allocator(), 10, Tessellator.TessellationOptions.DEFAULT, [2]usize{ 10, 10 }, std.ArrayList(TextureAtlas.PreparedDisc).init(gpa.allocator()));
+        defer tessellator.deinit();
+        try tessellator.tessellateCircle(Shape.Circle.filled(Pos2.T{ 100, 200 }, 55, Color.Color32.RED), &mesh);
+        try tessellator.tessellateCircle(Shape.Circle.stroke(Pos2.T{ 250, 200 }, 76, .{ .width = 5, .color = Color.Color32.DARK_BLUE }), &mesh);
+
+        // Convert vertices.
+        for (mesh.vertices.items) |v| {
+            const rgba = v.color.toRgba();
+            const color = @Vector(3, f32){ rgba.r(), rgba.g(), rgba.b() };
+            try tessellated_vertices.append(.{ .pos = v.pos / Vec2.splat(500), .col = color });
+        }
+    }
+    vertices = tessellated_vertices.items;
+    index_data = mesh.indices.items;
 
     const vertex_attributes = [_]gpu.VertexAttribute{
         .{ .format = .float32x2, .offset = @offsetOf(Vertex, "pos"), .shader_location = 0 },
@@ -137,7 +171,7 @@ pub fn update(app: *App) !bool {
     pass.setPipeline(app.pipeline);
     pass.setVertexBuffer(0, app.vertex_buffer, 0, @sizeOf(Vertex) * vertices.len);
     pass.setIndexBuffer(app.index_buffer, .uint32, 0, @sizeOf(u32) * index_data.len);
-    pass.drawIndexed(index_data.len, 1, 0, 0, 0);
+    pass.drawIndexed(@intCast(index_data.len), 1, 0, 0, 0);
     pass.end();
     pass.release();
 
