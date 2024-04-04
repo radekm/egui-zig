@@ -34,16 +34,12 @@ test "force typechecking" {
     std.testing.refAllDeclsRecursive(TextureAtlas);
 }
 
-const Vertex = extern struct {
-    pos: @Vector(2, f32),
-    col: @Vector(3, f32),
-};
-var vertices: []const Vertex = &.{
-    .{ .pos = .{ -0.5, -0.5 }, .col = .{ 1, 0, 0 } }, // left bottom
-    .{ .pos = .{ 0.5, -0.5 }, .col = .{ 0, 1, 0 } }, // right bottom
-    .{ .pos = .{ 0.5, 0.5 }, .col = .{ 0, 0, 1 } }, // right top
-    .{ .pos = .{ -0.5, 0.5 }, .col = .{ 1, 1, 0.5 } }, // left top
-    .{ .pos = .{ 0, 0.9 }, .col = .{ 1, 1, 0.5 } }, // middle completely top
+var vertices: []const Mesh.Vertex = &.{
+    .{ .pos = .{ -0.5, -0.5 }, .uv = Mesh.WHITE_UV, .color = .{ .rgba = .{ 255, 0, 0, 255 } } }, // left bottom
+    .{ .pos = .{ 0.5, -0.5 }, .uv = Mesh.WHITE_UV, .color = .{ .rgba = .{ 0, 255, 0, 255 } } }, // right bottom
+    .{ .pos = .{ 0.5, 0.5 }, .uv = Mesh.WHITE_UV, .color = .{ .rgba = .{ 0, 0, 255, 255 } } }, // right top
+    .{ .pos = .{ -0.5, 0.5 }, .uv = Mesh.WHITE_UV, .color = .{ .rgba = .{ 255, 255, 128, 255 } } }, // left top
+    .{ .pos = .{ 0, 0.9 }, .uv = Mesh.WHITE_UV, .color = .{ .rgba = .{ 255, 255, 128, 255 } } }, // middle completely top
 };
 var index_data: []const u32 = &.{
     0, 1, 2,
@@ -68,30 +64,22 @@ pub fn init(app: *App) !void {
 
     var mesh = Mesh.init(gpa.allocator(), Texture.Id.DEFAULT);
     defer mesh.deinit();
-    var tessellated_vertices = std.ArrayList(Vertex).init(gpa.allocator());
-    defer tessellated_vertices.deinit();
     {
-        var tessellator = Tessellator.init(gpa.allocator(), 10, Tessellator.TessellationOptions.DEFAULT, [2]usize{ 10, 10 }, std.ArrayList(TextureAtlas.PreparedDisc).init(gpa.allocator()));
+        var tessellator = Tessellator.init(gpa.allocator(), 16, Tessellator.TessellationOptions.DEFAULT, [2]usize{ 10, 10 }, std.ArrayList(TextureAtlas.PreparedDisc).init(gpa.allocator()));
         defer tessellator.deinit();
         try tessellator.tessellateCircle(Shape.Circle.filled(Pos2.T{ 100, 200 }, 55, Color.Color32.RED), &mesh);
         try tessellator.tessellateCircle(Shape.Circle.stroke(Pos2.T{ 250, 200 }, 76, .{ .width = 5, .color = Color.Color32.DARK_BLUE }), &mesh);
-
-        // Convert vertices.
-        for (mesh.vertices.items) |v| {
-            const rgba = v.color.toRgba();
-            const color = @Vector(3, f32){ rgba.r(), rgba.g(), rgba.b() };
-            try tessellated_vertices.append(.{ .pos = v.pos / Vec2.splat(500), .col = color });
-        }
     }
-    vertices = tessellated_vertices.items;
+    vertices = mesh.vertices.items;
     index_data = mesh.indices.items;
 
     const vertex_attributes = [_]gpu.VertexAttribute{
-        .{ .format = .float32x2, .offset = @offsetOf(Vertex, "pos"), .shader_location = 0 },
-        .{ .format = .float32x3, .offset = @offsetOf(Vertex, "col"), .shader_location = 1 },
+        .{ .format = .float32x2, .offset = @offsetOf(Mesh.Vertex, "pos"), .shader_location = 0 },
+        .{ .format = .float32x2, .offset = @offsetOf(Mesh.Vertex, "uv"), .shader_location = 1 },
+        .{ .format = .uint32, .offset = @offsetOf(Mesh.Vertex, "color"), .shader_location = 2 },
     };
     const vertex_buffer_layout = gpu.VertexBufferLayout.init(.{
-        .array_stride = @sizeOf(Vertex),
+        .array_stride = @sizeOf(Mesh.Vertex),
         .step_mode = .vertex,
         .attributes = &vertex_attributes,
     });
@@ -123,10 +111,10 @@ pub fn init(app: *App) !void {
 
     const vertex_buffer = core.device.createBuffer(&.{
         .usage = .{ .vertex = true },
-        .size = @sizeOf(Vertex) * vertices.len,
+        .size = @sizeOf(Mesh.Vertex) * vertices.len,
         .mapped_at_creation = .true,
     });
-    const vertex_mapped = vertex_buffer.getMappedRange(Vertex, 0, vertices.len);
+    const vertex_mapped = vertex_buffer.getMappedRange(Mesh.Vertex, 0, vertices.len);
     @memcpy(vertex_mapped.?, vertices[0..]);
     vertex_buffer.unmap();
 
@@ -169,7 +157,7 @@ pub fn update(app: *App) !bool {
 
     const pass = encoder.beginRenderPass(&render_pass_info);
     pass.setPipeline(app.pipeline);
-    pass.setVertexBuffer(0, app.vertex_buffer, 0, @sizeOf(Vertex) * vertices.len);
+    pass.setVertexBuffer(0, app.vertex_buffer, 0, @sizeOf(Mesh.Vertex) * vertices.len);
     pass.setIndexBuffer(app.index_buffer, .uint32, 0, @sizeOf(u32) * index_data.len);
     pass.drawIndexed(@intCast(index_data.len), 1, 0, 0, 0);
     pass.end();
