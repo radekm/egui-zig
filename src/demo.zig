@@ -56,6 +56,9 @@ pipeline: *gpu.RenderPipeline,
 vertex_buffer: *gpu.Buffer,
 index_buffer: *gpu.Buffer,
 
+bind_group: *gpu.BindGroup,
+uniform_buffer: *gpu.Buffer,
+
 pub fn init(app: *App) !void {
     try core.init(.{});
 
@@ -95,7 +98,20 @@ pub fn init(app: *App) !void {
         .targets = &.{color_target},
     });
 
-    const pipeline_layout = core.device.createPipelineLayout(&gpu.PipelineLayout.Descriptor.init(.{}));
+    const bind_group_layout = core.device.createBindGroupLayout(&gpu.BindGroupLayout.Descriptor.init(.{
+        .entries = &.{gpu.BindGroupLayout.Entry.buffer(
+            0,
+            .{ .vertex = true },
+            .uniform,
+            false,
+            @sizeOf(Vec2.T),
+        )},
+    }));
+    defer bind_group_layout.release();
+
+    const pipeline_layout = core.device.createPipelineLayout(&gpu.PipelineLayout.Descriptor.init(.{
+        .bind_group_layouts = &.{bind_group_layout},
+    }));
     defer pipeline_layout.release();
 
     const pipeline_descriptor = gpu.RenderPipeline.Descriptor{
@@ -127,13 +143,34 @@ pub fn init(app: *App) !void {
     @memcpy(index_mapped.?, index_data[0..]);
     index_buffer.unmap();
 
+    const uniform_buffer = core.device.createBuffer(&.{
+        .usage = .{ .uniform = true, .copy_dst = true },
+        .size = @sizeOf(Vec2.T),
+        .mapped_at_creation = .false,
+    });
+
+    const bind_group_descriptor = gpu.BindGroup.Descriptor.init(.{
+        .layout = bind_group_layout,
+        .entries = &.{
+            gpu.BindGroup.Entry.buffer(
+                0,
+                uniform_buffer,
+                0,
+                @sizeOf(Vec2.T),
+            ),
+        },
+    });
+
     app.title_timer = try core.Timer.start();
     app.pipeline = core.device.createRenderPipeline(&pipeline_descriptor);
+    app.bind_group = core.device.createBindGroup(&bind_group_descriptor);
     app.vertex_buffer = vertex_buffer;
     app.index_buffer = index_buffer;
+    app.uniform_buffer = uniform_buffer;
 }
 
 pub fn deinit(app: *App) void {
+    app.uniform_buffer.release();
     app.vertex_buffer.release();
     app.index_buffer.release();
     app.pipeline.release();
@@ -155,10 +192,14 @@ pub fn update(app: *App) !bool {
     };
     const render_pass_info = gpu.RenderPassDescriptor.init(.{ .color_attachments = &.{color_attachment} });
 
+    const window_size: [2]f32 = Vec2.T{ @floatFromInt(core.size().width), @floatFromInt(core.size().height) };
+    encoder.writeBuffer(app.uniform_buffer, 0, &window_size);
+
     const pass = encoder.beginRenderPass(&render_pass_info);
     pass.setPipeline(app.pipeline);
     pass.setVertexBuffer(0, app.vertex_buffer, 0, @sizeOf(Mesh.Vertex) * vertices.len);
     pass.setIndexBuffer(app.index_buffer, .uint32, 0, @sizeOf(u32) * index_data.len);
+    pass.setBindGroup(0, app.bind_group, null);
     pass.drawIndexed(@intCast(index_data.len), 1, 0, 0, 0);
     pass.end();
     pass.release();
