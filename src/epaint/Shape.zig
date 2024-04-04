@@ -44,6 +44,48 @@ pub const Circle = struct {
     }
 };
 
+// ----------------------------------------------------------------------------
+
+/// How to paint an ellipse.
+pub const Ellipse = struct {
+    center: Pos2.T,
+    /// Radius is the vector (a, b) where the width of the Ellipse is 2a and the height is 2b
+    radius: Vec2.T,
+    fill: Color.Color32,
+    stroke: Stroke.T,
+
+    pub fn filled(center: Pos2.T, radius: Vec2.T, fill_color: Color.Color32) Ellipse {
+        return .{
+            .center = center,
+            .radius = radius,
+            .fill = fill_color,
+            .stroke = Stroke.NONE,
+        };
+    }
+
+    pub fn stroke(center: Pos2.T, radius: Vec2.T, stroke0: Stroke.T) Ellipse {
+        return .{
+            .center = center,
+            .radius = radius,
+            .fill = Color.Color32.TRANSPARENT,
+            .stroke = stroke0,
+        };
+    }
+
+    /// The visual bounding rectangle (includes stroke width)
+    pub fn visualBoundingRect(self: Ellipse) Rect.T {
+        return if (self.fill.eql(Color.Color32.TRANSPARENT) and self.stroke.isEmpty())
+            Rect.NOTHING
+        else
+            Rect.fromCenterSize(
+                self.center,
+                self.radius * Vec2.splat(2.0) + Vec2.splat(self.stroke.width),
+            );
+    }
+};
+
+// ----------------------------------------------------------------------------
+
 /// How rounded the corners of things should be
 pub const Rounding = struct {
     /// Radius of the rounding of the North-West (left top) corner.

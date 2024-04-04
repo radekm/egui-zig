@@ -70,8 +70,15 @@ pub fn init(app: *App) !void {
     {
         var tessellator = Tessellator.init(gpa.allocator(), 16, Tessellator.TessellationOptions.DEFAULT, [2]usize{ 10, 10 }, std.ArrayList(TextureAtlas.PreparedDisc).init(gpa.allocator()));
         defer tessellator.deinit();
+
         try tessellator.tessellateCircle(Shape.Circle.filled(Pos2.T{ 100, 200 }, 55, Color.Color32.RED), &mesh);
         try tessellator.tessellateCircle(Shape.Circle.stroke(Pos2.T{ 250, 200 }, 76, .{ .width = 5, .color = Color.Color32.DARK_BLUE }), &mesh);
+        try tessellator.tessellateEllipse(.{
+            .center = Pos2.T{ 80, 380 },
+            .radius = Vec2.T{ 80, 30 },
+            .fill = Color.Color32.YELLOW,
+            .stroke = .{ .width = 5, .color = Color.Color32.GREEN },
+        }, &mesh);
     }
     vertices = mesh.vertices.items;
     index_data = mesh.indices.items;

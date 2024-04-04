@@ -326,7 +326,7 @@ const Path = struct {
         try self.points.ensureUnusedCapacity(additional);
     }
 
-    pub fn addPoint(self: *Path, pos: Pos2, normal: Vec2) Allocator.Error!void {
+    pub fn addPoint(self: *Path, pos: Pos2.T, normal: Vec2.T) Allocator.Error!void {
         try self.points.append(PathPoint{ .pos = pos, .normal = normal });
     }
 
@@ -401,25 +401,25 @@ const Path = struct {
         }
     }
 
-    pub fn addLineLoop(self: *Path, points: []Pos2) Allocator.Error!void {
-        const n = points.len();
+    pub fn addLineLoop(self: *Path, points: []Pos2.T) Allocator.Error!void {
+        const n = points.len;
         std.debug.assert(n >= 2);
 
-        self.reserve(n);
-        var n0 = (points[0] - points[n - 1]).normalized().rot90();
+        try self.reserve(n);
+        var n0 = Vec2.rot90(Vec2.normalize(points[0] - points[n - 1]));
         for (0..n) |i| {
             const next_i = if (i + 1 == n)
                 0
             else
                 i + 1;
-            var n1 = (points[next_i] - points[i]).normalized().rot90();
+            var n1 = Vec2.rot90(Vec2.normalize(points[next_i] - points[i]));
             // Handle duplicated points (but not triplicated…):
-            if (n0 == Vec2.ZERO) {
+            if (Vec2.isZero(n0)) {
                 n0 = n1;
-            } else if (n1 == Vec2.ZERO) {
+            } else if (Vec2.isZero(n1)) {
                 n1 = n0;
             }
-            const normal = (n0 + n1) / 2.0;
+            const normal = (n0 + n1) / Vec2.splat(2.0);
             const length_sq = Vec2.lengthSq(normal);
             // We can't just cut off corners for filled shapes like this,
             // because the feather will both expand and contract the corner along the provided normals
@@ -441,7 +441,7 @@ const Path = struct {
                 self.addPoint(points[i], n1c / Vec2.lengthSq(n1c));
             } else {
                 // miter join
-                self.addPoint(points[i], normal / length_sq);
+                try self.addPoint(points[i], normal / Vec2.splat(length_sq));
             }
             n0 = n1;
         }
@@ -920,6 +920,7 @@ fn mulColor(color: Color.Color32, factor: f32) Color.Color32 {
 ///
 /// See also [`tessellate_shapes`], a convenient wrapper around [`Tessellator`].
 pub const T = struct {
+    allocator: Allocator,
     pixels_per_point: f32,
     options: TessellationOptions,
     font_tex_size: [2]usize,
@@ -996,7 +997,76 @@ pub const T = struct {
         try self.scratchpad_path.strokeClosed(self.feathering, stroke, out);
     }
 
-    // TODO: Translate `tessellateEllipse` from Rust to Zig.
+    /// Tessellate a single [`EllipseShape`] into a [`Mesh`].
+    ///
+    /// * `shape`: the ellipse to tessellate.
+    /// * `out`: triangles are appended to this.
+    pub fn tessellateEllipse(self: *T, ellipse: Shape.Ellipse, out: *Mesh.T) Allocator.Error!void {
+        const center = ellipse.center;
+        const radius = ellipse.radius;
+        const fill = ellipse.fill;
+        const stroke = ellipse.stroke;
+        if (radius[0] <= 0.0 or radius[1] <= 0.0)
+            return;
+
+        if (self.options.coarse_tessellation_culling and
+            !self.clip_rect.expand2(radius + Vec2.splat(stroke.width)).contains(center))
+            return;
+
+        // Get the max pixel radius
+        const max_radius: u32 = @intFromFloat(@reduce(.Max, radius) * self.pixels_per_point);
+        // Ensure there is at least 8 points in each quarter of the ellipse
+        const num_points: u32 = @max(8, max_radius / 16);
+        // Create an ease ratio based the ellipses a and b
+        const ratio = std.math.clamp((radius[1] / radius[0]) / 2.0, 0.0, 1.0);
+
+        // Generate points between the 0 to pi/2
+        const quarter = try self.allocator.alloc(Vec2.T, num_points);
+        defer self.allocator.free(quarter);
+        for (quarter, 1..) |*q, i| {
+            const percent = @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(num_points));
+
+            // Ease the percent value, concentrating points around tight bends
+            const eased = 2.0 * (percent - percent * percent) * ratio + percent * percent;
+
+            // Scale the ease to the quarter
+            const t = eased * std.math.pi / 2;
+            q.* = Vec2.T{ radius[0] * @cos(t), radius[1] * @sin(t) };
+        }
+
+        // Build the ellipse from the 4 known vertices filling arcs between
+        // them by mirroring the points between 0 and pi/2
+        var points = try std.ArrayList(Vec2.T).initCapacity(self.allocator, 4 * (quarter.len + 1));
+        defer points.deinit();
+
+        try points.append(center + Vec2.T{ radius[0], 0.0 });
+        for (try points.addManyAsSlice(quarter.len), quarter) |*added_point, q| {
+            added_point.* = center + q;
+        }
+
+        try points.append(center + Vec2.T{ 0.0, radius[1] });
+        for (try points.addManyAsSlice(quarter.len), 0..) |*added_point, i| {
+            const q = quarter[quarter.len - i - 1];
+            added_point.* = center + Vec2.T{ -q[0], q[1] };
+        }
+
+        try points.append(center + Vec2.T{ -radius[0], 0.0 });
+        for (try points.addManyAsSlice(quarter.len), quarter) |*added_point, q| {
+            added_point.* = center - q;
+        }
+
+        try points.append(center + Vec2.T{ 0.0, -radius[1] });
+        for (try points.addManyAsSlice(quarter.len), 0..) |*added_point, i| {
+            const q = quarter[quarter.len - i - 1];
+            added_point.* = center + Vec2.T{ q[0], -q[1] };
+        }
+
+        self.scratchpad_path.clear();
+        try self.scratchpad_path.addLineLoop(points.items);
+        try self.scratchpad_path.fill(self.feathering, fill, out);
+        try self.scratchpad_path.strokeClosed(self.feathering, stroke, out);
+    }
+
     // TODO: Translate `tessellateMesh` from Rust to Zig.
     // TODO: Translate `tessellateLine` from Rust to Zig.
     // TODO: Translate `tessellatePath` from Rust to Zig.
@@ -1007,6 +1077,8 @@ pub const T = struct {
     // TODO: Translate `tessellateBezierComplete` from Rust to Zig.
     // TODO: Translate `addClipRects` from Rust to Zig.
 };
+
+// TODO: Shouldn't `prepared_discs` be slice rather than `ArrayList`?
 
 /// Create a new [`Tessellator`].
 ///
@@ -1028,6 +1100,7 @@ pub fn init(
         feathering = options.feathering_size_in_pixels * pixel_size;
     }
     return .{
+        .allocator = allocator,
         .pixels_per_point = pixels_per_point,
         .options = options,
         .font_tex_size = font_tex_size,

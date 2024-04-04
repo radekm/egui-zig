@@ -17,6 +17,10 @@ pub const DOWN = T{ 0, 1 };
 pub const ZERO = T{ 0, 0 };
 pub const INFINITY = T{ std.math.inf(f32), std.math.inf(f32) };
 
+pub fn isZero(v: T) bool {
+    return v[0] == 0 and v[1] == 0;
+}
+
 /// Set both `x` and `y` to the same value.
 pub fn splat(v: f32) T {
     return @splat(v);
