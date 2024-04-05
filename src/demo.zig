@@ -108,7 +108,18 @@ pub fn init(app: *App) !void {
 
     const color_target = gpu.ColorTargetState{
         .format = core.descriptor.format,
-        .blend = &.{},
+        .blend = &.{
+            .color = .{
+                .src_factor = .one,
+                .dst_factor = .one_minus_src_alpha,
+                .operation = .add,
+            },
+            .alpha = .{
+                .src_factor = .one_minus_src_alpha,
+                .dst_factor = .one,
+                .operation = .add,
+            },
+        },
         .write_mask = gpu.ColorWriteMaskFlags.all,
     };
     const fragment = gpu.FragmentState.init(.{
