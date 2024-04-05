@@ -1,5 +1,7 @@
 # Drawing other shapes
 
+## Ellipse
+
 Now we will add support for other shapes. Let's start with ellipse.
 We translate `EllipseShape` as `Shape.Ellipse`. It seems weird that `tessellateEllipse`
 allocates memory for slice `quarter` and array list `points`.
@@ -31,3 +33,38 @@ if (CUT_OFF_SHARP_CORNERS and sharper_than_a_right_angle) {
 
 Body calls method `normalized` which doesn't exist and
 `try` is missing before `self.addPoint` calls.
+
+## Path
+
+Next we add support for path. We translate `PathShape` as `Shape.Path`
+and `tessellate_path` as `tessellatePath`. Similarly to `addLineLoop`
+we discovered that `addOpenPoints` was completely wrong after we called it
+from `tessellatePath`.
+
+And finally, the problem that gave me a bit of trouble.
+Originally in `tessellatePath` I had the following code
+
+```zig
+const typ = if (closed)
+    PathType.closed
+else
+    PathType.open;
+```
+
+Running `zig build` resulted in the following error
+
+```
+error: error: Invalid record (Producer: 'zig 0.12.0' Reader: 'LLVM 17.0.6')
+```
+
+which unfortunately doesn't give any clue what's wrong. By commenting out different parts
+of the code I discovered where the problem is and rewrote the expression to
+
+```zig
+const typ: PathType = if (closed)
+    .closed
+else
+    .open;
+```
+
+which fixed it.

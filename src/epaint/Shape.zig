@@ -86,6 +86,71 @@ pub const Ellipse = struct {
 
 // ----------------------------------------------------------------------------
 
+// TODO: Consider whether `Path.points` should be slice instead of array list.
+
+/// A path which can be stroked and/or filled (if closed).
+pub const Path = struct {
+    /// Filled paths should prefer clockwise order.
+    points: std.ArrayList(Pos2.T),
+    /// If true, connect the first and last of the points together.
+    /// This is required if `fill != TRANSPARENT`.
+    closed: bool,
+    /// Fill is only supported for convex polygons.
+    fill: Color.Color32,
+    /// Color and thickness of the line.
+    stroke: Stroke.T,
+    // TODO(emilk): Add texture support either by supplying uv for each point,
+    // or by some transform from points to uv (e.g. a callback or a linear transform matrix).
+
+    /// A line through many points.
+    ///
+    /// Use [`Shape::line_segment`] instead if your line only connects two points.
+    pub fn line(points: std.ArrayList(Pos2.T), stroke: Stroke.T) Path {
+        return .{
+            .points = points,
+            .closed = false,
+            .fill = Color.Color32.TRANSPARENT,
+            .stroke = stroke,
+        };
+    }
+
+    /// A line that closes back to the start point again.
+    pub fn closedLine(points: std.ArrayList(Pos2.T), stroke: Stroke.T) Path {
+        return .{
+            .points = points,
+            .closed = true,
+            .fill = Color.Color32.TRANSPARENT,
+            .stroke = stroke,
+        };
+    }
+
+    /// A convex polygon with a fill and optional stroke.
+    ///
+    /// The most performant winding order is clockwise.
+    pub fn convexPolygon(
+        points: std.ArrayList(Pos2.T),
+        fill: Color.Color32,
+        stroke: Stroke.T,
+    ) Path {
+        return .{
+            .points = points,
+            .closed = true,
+            .fill = fill,
+            .stroke = stroke,
+        };
+    }
+
+    /// The visual bounding rectangle (includes stroke width)
+    pub fn visualBoundingRect(self: Path) Rect.T {
+        return if (self.fill.eql(Color.Color32.TRANSPARENT) and self.stroke.isEmpty())
+            Rect.NOTHING
+        else
+            Rect.fromPoints(self.points.items).expand(self.stroke.width / 2.0);
+    }
+};
+
+// ----------------------------------------------------------------------------
+
 /// How rounded the corners of things should be
 pub const Rounding = struct {
     /// Radius of the rounding of the North-West (left top) corner.

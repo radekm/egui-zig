@@ -79,6 +79,18 @@ pub fn init(app: *App) !void {
             .fill = Color.Color32.YELLOW,
             .stroke = .{ .width = 5, .color = Color.Color32.GREEN },
         }, &mesh);
+
+        var points = std.ArrayList(Pos2.T).init(gpa.allocator());
+        defer points.deinit();
+        try points.append(Pos2.T{ 30, 10 });
+        try points.append(Pos2.T{ 40, 10 });
+        try points.append(Pos2.T{ 60, 20 });
+        try points.append(Pos2.T{ 35, 30 });
+        try tessellator.tessellatePath(Shape.Path.convexPolygon(
+            points,
+            Color.Color32.LIGHT_RED,
+            .{ .width = 3, .color = Color.Color32.DARK_BLUE },
+        ), &mesh);
     }
     vertices = mesh.vertices.items;
     index_data = mesh.indices.items;

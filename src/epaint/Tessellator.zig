@@ -353,13 +353,13 @@ const Path = struct {
 
     pub fn addLineSegment(self: *Path, points: [2]Pos2.T) Allocator.Error!void {
         const added = try self.points.addManyAsArray(2);
-        const normal = (points[1] - points[0]).normalized().rot90();
+        const normal = Vec2.rot90(Vec2.normalize(points[1] - points[0]));
         added[0] = .{ .pos = points[0], .normal = normal };
         added[1] = .{ .pos = points[1], .normal = normal };
     }
 
     pub fn addOpenPoints(self: *Path, points: []Pos2.T) Allocator.Error!void {
-        const n = points.len();
+        const n = points.len;
         std.debug.assert(n >= 2);
 
         if (n == 2) {
@@ -367,36 +367,36 @@ const Path = struct {
             try self.addLineSegment([2]Pos2.T{ points[0], points[1] });
         } else {
             try self.reserve(n);
-            try self.addPoint(points[0], (points[1] - points[0]).normalized().rot90());
-            var n0 = (points[1] - points[0]).normalized().rot90();
+            try self.addPoint(points[0], Vec2.rot90(Vec2.normalize(points[1] - points[0])));
+            var n0 = Vec2.rot90(Vec2.normalize(points[1] - points[0]));
             for (1..n - 1) |i| {
-                var n1 = (points[i + 1] - points[i]).normalized().rot90();
+                var n1 = Vec2.rot90(Vec2.normalize(points[i + 1] - points[i]));
                 // Handle duplicated points (but not triplicated…):
-                if (n0 == Vec2.ZERO) {
+                if (Vec2.isZero(n0)) {
                     n0 = n1;
-                } else if (n1 == Vec2.ZERO) {
+                } else if (Vec2.isZero(n1)) {
                     n1 = n0;
                 }
-                const normal = (n0 + n1) / 2.0;
+                const normal = (n0 + n1) / Vec2.splat(2.0);
                 const length_sq = Vec2.lengthSq(normal);
                 const right_angle_length_sq = 0.5;
                 const sharper_than_a_right_angle = length_sq < right_angle_length_sq;
                 if (sharper_than_a_right_angle) {
                     // cut off the sharp corner
-                    const center_normal = normal.normalized();
-                    const n0c = (n0 + center_normal) / 2.0;
-                    const n1c = (n1 + center_normal) / 2.0;
-                    try self.addPoint(points[i], n0c / Vec2.lengthSq(n0c));
-                    try self.addPoint(points[i], n1c / Vec2.lengthSq(n1c));
+                    const center_normal = Vec2.normalize(normal);
+                    const n0c = (n0 + center_normal) / Vec2.splat(2.0);
+                    const n1c = (n1 + center_normal) / Vec2.splat(2.0);
+                    try self.addPoint(points[i], n0c / Vec2.splat(Vec2.lengthSq(n0c)));
+                    try self.addPoint(points[i], n1c / Vec2.splat(Vec2.lengthSq(n1c)));
                 } else {
                     // miter join
-                    try self.addPoint(points[i], normal / length_sq);
+                    try self.addPoint(points[i], normal / Vec2.splat(length_sq));
                 }
                 n0 = n1;
             }
-            self.addPoint(
+            try self.addPoint(
                 points[n - 1],
-                (points[n - 1] - points[n - 2]).normalized().rot90(),
+                Vec2.rot90(Vec2.normalize(points[n - 1] - points[n - 2])),
             );
         }
     }
@@ -456,7 +456,7 @@ const Path = struct {
         try strokePath(feathering, self.points.items, .closed, stroke0, out);
     }
     pub fn stroke(self: Path, feathering: f32, path_type: PathType, stroke0: Stroke.T, out: *Mesh.T) Allocator.Error!void {
-        try strokePath(feathering, &self.points.items, path_type, stroke0, out);
+        try strokePath(feathering, self.points.items, path_type, stroke0, out);
     }
 
     /// The path is taken to be closed (i.e. returning to the start again).
@@ -1069,7 +1069,40 @@ pub const T = struct {
 
     // TODO: Translate `tessellateMesh` from Rust to Zig.
     // TODO: Translate `tessellateLine` from Rust to Zig.
-    // TODO: Translate `tessellatePath` from Rust to Zig.
+
+    /// Tessellate a single [`PathShape`] into a [`Mesh`].
+    ///
+    /// * `path_shape`: the path to tessellate.
+    /// * `out`: triangles are appended to this.
+    pub fn tessellatePath(self: *T, path: Shape.Path, out: *Mesh.T) Allocator.Error!void {
+        if (path.points.items.len < 2)
+            return;
+
+        if (self.options.coarse_tessellation_culling and !path.visualBoundingRect().intersects(self.clip_rect))
+            return;
+
+        const points = path.points.items;
+        const closed = path.closed;
+        const fill = path.fill;
+        const stroke = path.stroke;
+
+        self.scratchpad_path.clear();
+        if (closed) {
+            try self.scratchpad_path.addLineLoop(points);
+        } else {
+            try self.scratchpad_path.addOpenPoints(points);
+        }
+        if (!fill.eql(Color.Color32.TRANSPARENT)) {
+            std.debug.assert(closed); // You asked to fill a path that is not closed. That makes no sense.
+            try self.scratchpad_path.fill(self.feathering, fill, out);
+        }
+        const typ: PathType = if (closed)
+            .closed
+        else
+            .open;
+        try self.scratchpad_path.stroke(self.feathering, typ, stroke, out);
+    }
+
     // TODO: Translate `tessellateRect` from Rust to Zig.
     // TODO: Translate `tessellateText` from Rust to Zig.
     // TODO: Translate `tessellateQuadraticBezier` from Rust to Zig.
