@@ -68,3 +68,15 @@ else
 ```
 
 which fixed it.
+
+## Rect
+
+We want to translate `RectShape` to `Shape.Rect`. But since `Rect` name is already
+used by `Rect` from `emath` we first import whole `emath` as `m` and start referring
+to `Rect` from `emath` by `m.Rect`.
+
+Function `tessellate_rect` calls `fill_closed_path_with_uv` giving it lambda function `uv_from_pos`.
+Zig doesn't support lambda functions. Fortunately for us `fill_closed_path_with_uv` is always
+called with the same lambda. This means that we can specialize our translated `fillClosedPathWithUv`
+to concrete lambda a don't have to pass any lambda. Instead of lambda we pass
+values from its closure `rect_to_fill: Rect.T` and `rect_in_texture: Rect.T`.

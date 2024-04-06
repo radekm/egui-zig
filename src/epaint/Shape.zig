@@ -1,11 +1,12 @@
 const std = @import("std");
 
-const Pos2 = @import("../emath/Pos2.zig");
-const Rect = @import("../emath/Rect.zig");
-const Vec2 = @import("../emath/Vec2.zig");
+const m = @import("../emath/lib.zig");
+const Pos2 = m.Pos2;
+const Vec2 = m.Vec2;
 
 const Color = @import("Color.zig");
 const Stroke = @import("Stroke.zig");
+const Texture = @import("Texture.zig");
 
 /// How to paint a circle.
 pub const Circle = struct {
@@ -33,11 +34,11 @@ pub const Circle = struct {
     }
 
     /// The visual bounding rectangle (includes stroke width)
-    pub fn visualBoundingRect(self: Circle) Rect.T {
+    pub fn visualBoundingRect(self: Circle) m.Rect.T {
         return if (self.fill.eql(Color.Color32.TRANSPARENT) and self.stroke.isEmpty())
-            return Rect.NOTHING
+            m.Rect.NOTHING
         else
-            Rect.fromCenterSize(
+            m.Rect.fromCenterSize(
                 self.center,
                 Vec2.splat(self.radius * 2.0 + self.stroke.width),
             );
@@ -73,11 +74,11 @@ pub const Ellipse = struct {
     }
 
     /// The visual bounding rectangle (includes stroke width)
-    pub fn visualBoundingRect(self: Ellipse) Rect.T {
+    pub fn visualBoundingRect(self: Ellipse) m.Rect.T {
         return if (self.fill.eql(Color.Color32.TRANSPARENT) and self.stroke.isEmpty())
-            Rect.NOTHING
+            m.Rect.NOTHING
         else
-            Rect.fromCenterSize(
+            m.Rect.fromCenterSize(
                 self.center,
                 self.radius * Vec2.splat(2.0) + Vec2.splat(self.stroke.width),
             );
@@ -141,11 +142,106 @@ pub const Path = struct {
     }
 
     /// The visual bounding rectangle (includes stroke width)
-    pub fn visualBoundingRect(self: Path) Rect.T {
+    pub fn visualBoundingRect(self: Path) m.Rect.T {
         return if (self.fill.eql(Color.Color32.TRANSPARENT) and self.stroke.isEmpty())
-            Rect.NOTHING
+            m.Rect.NOTHING
         else
-            Rect.fromPoints(self.points.items).expand(self.stroke.width / 2.0);
+            m.Rect.fromPoints(self.points.items).expand(self.stroke.width / 2.0);
+    }
+};
+
+// ----------------------------------------------------------------------------
+
+/// How to paint a rectangle.
+pub const Rect = struct {
+    rect: m.Rect.T,
+    /// How rounded the corners are. Use `Rounding::ZERO` for no rounding.
+    rounding: Rounding,
+    /// How to fill the rectangle.
+    fill: Color.Color32,
+    /// The thickness and color of the outline.
+    stroke: Stroke.T,
+    /// If larger than zero, the edges of the rectangle
+    /// (for both fill and stroke) will be blurred.
+    ///
+    /// This can be used to produce shadows and glow effects.
+    ///
+    /// The blur is currently implemented using a simple linear blur in sRGBA gamma space.
+    blur_width: f32,
+    /// If the rect should be filled with a texture, which one?
+    ///
+    /// The texture is multiplied with [`Self::fill`].
+    fill_texture_id: Texture.Id,
+    /// What UV coordinates to use for the texture?
+    ///
+    /// To display a texture, set [`Self::fill_texture_id`],
+    /// and set this to `Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0))`.
+    ///
+    /// Use [`Rect::ZERO`] to turn off texturing.
+    uv: m.Rect.T,
+
+    pub fn new(
+        rect: m.Rect.T,
+        rounding: Rounding,
+        fill_color: Color.Color32,
+        stroke0: Stroke.T,
+    ) Rect {
+        return .{
+            .rect = rect,
+            .rounding = rounding,
+            .fill = fill_color,
+            .stroke = stroke0,
+            .blur_width = 0.0,
+            .fill_texture_id = Texture.Id.DEFAULT,
+            .uv = m.Rect.ZERO,
+        };
+    }
+
+    pub fn filled(
+        rect: m.Rect.T,
+        rounding: Rounding,
+        fill_color: Color.Color32,
+    ) Rect {
+        return .{
+            .rect = rect,
+            .rounding = rounding,
+            .fill = fill_color,
+            .stroke = Stroke.NONE,
+            .blur_width = 0.0,
+            .fill_texture_id = Texture.Id.DEFAULT,
+            .uv = m.Rect.ZERO,
+        };
+    }
+    pub fn stroke(rect: m.Rect.T, rounding: Rounding, stroke0: Stroke.T) Rect {
+        return .{
+            .rect = rect,
+            .rounding = rounding,
+            .fill = Color.Color32.TRANSPARENT,
+            .stroke = stroke0,
+            .blur_width = 0.0,
+            .fill_texture_id = Texture.Id.DEFAULT,
+            .uv = m.Rect.ZERO,
+        };
+    }
+
+    /// If larger than zero, the edges of the rectangle
+    /// (for both fill and stroke) will be blurred.
+    ///
+    /// This can be used to produce shadows and glow effects.
+    ///
+    /// The blur is currently implemented using a simple linear blur in `sRGBA` gamma space.
+    pub fn withBlurWidth(self: Rect, blur_width: f32) Rect {
+        var copy = self;
+        copy.blur_width = blur_width;
+        return copy;
+    }
+
+    /// The visual bounding rectangle (includes stroke width)
+    pub fn visualBoundingRect(self: Rect) m.Rect.T {
+        return if (self.fill.eql(Color.Color32.TRANSPARENT) and self.stroke.isEmpty())
+            m.Rect.NOTHING
+        else
+            self.rect.expand((self.stroke.width + self.blur_width) / 2.0);
     }
 };
 

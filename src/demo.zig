@@ -91,6 +91,13 @@ pub fn init(app: *App) !void {
             Color.Color32.LIGHT_RED,
             .{ .width = 3, .color = Color.Color32.DARK_BLUE },
         ), &mesh);
+
+        try tessellator.tessellateRect(Shape.Rect.new(
+            .{ .min = .{ 450, 20 }, .max = .{ 550, 120 } },
+            Shape.Rounding.same(10),
+            Color.Color32.BLUE,
+            .{ .width = 2, .color = Color.Color32.WHITE },
+        ), &mesh);
     }
     vertices = mesh.vertices.items;
     index_data = mesh.indices.items;

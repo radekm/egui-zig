@@ -6,9 +6,10 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const Pos2 = @import("../emath/Pos2.zig");
-const Rect = @import("../emath/Rect.zig");
-const Vec2 = @import("../emath/Vec2.zig");
+const m = @import("../emath/lib.zig");
+const Pos2 = m.Pos2;
+const Rect = m.Rect;
+const Vec2 = m.Vec2;
 
 const Color = @import("Color.zig");
 const Mesh = @import("Mesh.zig");
@@ -468,46 +469,70 @@ const Path = struct {
         try fillClosedPath(feathering, self.points.items, color, out);
     }
 
-    // TODO: Translate `fillWithUv` from Rust to Zig.
-
+    /// Like [`Self::fill`] but with texturing.
+    ///
+    /// The `uv_from_pos` is called for each vertex position.
+    pub fn fillWithUv(
+        self: *Path,
+        feathering: f32,
+        color: Color.Color32,
+        texture_id: Texture.Id,
+        rect_to_fill: Rect.T,
+        rect_in_texture: Rect.T,
+        out: *Mesh.T,
+    ) Allocator.Error!void {
+        try fillClosedPathWithUv(
+            feathering,
+            self.points.items,
+            color,
+            texture_id,
+            rect_to_fill,
+            rect_in_texture,
+            out,
+        );
+    }
 };
 
 const path_module = struct {
     //! Helpers for constructing paths
 
     /// overwrites existing points
-    pub fn roundedRectangle(path: *std.ArrayList(Pos2.T), rect: Rect.T, rounding: Shape.Rounding) void {
+    pub fn roundedRectangle(
+        path: *std.ArrayList(Pos2.T),
+        rect: Rect.T,
+        rounding: Shape.Rounding,
+    ) Allocator.Error!void {
         path.clearRetainingCapacity();
         const min = rect.min;
         const max = rect.max;
         const r = clampRounding(rounding, rect);
         if (r.eql(Shape.Rounding.ZERO)) {
             const added = try path.addManyAsArray(4);
-            added[0] = Pos2.T{ min.x, min.y }; // left top
-            added[1] = Pos2.T{ max.x, min.y }; // right top
-            added[2] = Pos2.T{ max.x, max.y }; // right bottom
-            added[3] = Pos2.T{ min.x, max.y }; // left bottom
+            added[0] = Pos2.T{ min[0], min[1] }; // left top
+            added[1] = Pos2.T{ max[0], min[1] }; // right top
+            added[2] = Pos2.T{ max[0], max[1] }; // right bottom
+            added[3] = Pos2.T{ min[0], max[1] }; // left bottom
 
         } else {
             // We need to avoid duplicated vertices, because that leads to visual artifacts later.
             // Duplicated vertices can happen when one side is all rounding, with no straight edge between.
             const eps = @reduce(.Max, Vec2.splat(std.math.floatEps(f32)) * rect.size());
-            addCircleQuadrant(path, Pos2.T{ max.x - r.se, max.y - r.se }, r.se, 0.0); // south east
+            try addCircleQuadrant(path, Pos2.T{ max[0] - r.se, max[1] - r.se }, r.se, 0.0); // south east
             if (rect.width() <= r.se + r.sw + eps) {
                 _ = path.pop(); // avoid duplicated vertex
 
             }
-            addCircleQuadrant(path, Pos2.T{ min.x + r.sw, max.y - r.sw }, r.sw, 1.0); // south west
+            try addCircleQuadrant(path, Pos2.T{ min[0] + r.sw, max[1] - r.sw }, r.sw, 1.0); // south west
             if (rect.height() <= r.sw + r.nw + eps) {
                 _ = path.pop(); // avoid duplicated vertex
 
             }
-            addCircleQuadrant(path, Pos2.T{ min.x + r.nw, min.y + r.nw }, r.nw, 2.0); // north west
+            try addCircleQuadrant(path, Pos2.T{ min[0] + r.nw, min[1] + r.nw }, r.nw, 2.0); // north west
             if (rect.width() <= r.nw + r.ne + eps) {
                 _ = path.pop(); // avoid duplicated vertex
 
             }
-            addCircleQuadrant(path, Pos2.T{ max.x - r.ne, min.y + r.ne }, r.ne, 3.0); // north east
+            try addCircleQuadrant(path, Pos2.T{ max[0] - r.ne, min[1] + r.ne }, r.ne, 3.0); // north east
             if (rect.height() <= r.ne + r.se + eps) {
                 _ = path.pop(); // avoid duplicated vertex
 
@@ -539,7 +564,7 @@ const path_module = struct {
         if (radius <= 0.0) {
             try path.append(center);
         } else {
-            var quadrant_vertices: []Vec2.T = undefined;
+            var quadrant_vertices: []const Vec2.T = undefined;
             if (radius <= 2.0) {
                 const offset = @as(usize, @intFromFloat(quadrant)) * 2;
                 quadrant_vertices = CIRCLE_8[offset .. offset + 3];
@@ -710,7 +735,100 @@ fn fillClosedPath(feathering: f32, path: []PathPoint, color: Color.Color32, out:
     }
 }
 
-// TODO: Translate `fillClosedPathWithUv` from Rust to Zig.
+/// Given position `pos` inside `rect_to_fill` interpolates position inside `rect_in_texture`.
+fn uvForPos(pos: Pos2.T, rect_to_fill: Rect.T, rect_in_texture: Rect.T) Pos2.T {
+    const from_x = rect_to_fill.xRange();
+    const to_x = rect_in_texture.xRange();
+    const from_y = rect_to_fill.yRange();
+    const to_y = rect_in_texture.yRange();
+    return .{
+        m.remap(f32, pos[0], from_x.min, from_x.max, to_x.min, to_x.max),
+        m.remap(f32, pos[1], from_y.min, from_y.max, to_y.min, to_y.max),
+    };
+}
+
+/// Like [`fill_closed_path`] but with texturing.
+///
+/// The `uv_from_pos` is called for each vertex position.
+fn fillClosedPathWithUv(
+    feathering: f32,
+    path: []PathPoint,
+    color: Color.Color32,
+    texture_id: Texture.Id,
+    rect_to_fill: Rect.T,
+    rect_in_texture: Rect.T,
+    out: *Mesh.T,
+) Allocator.Error!void {
+    if (color.eql(Color.Color32.TRANSPARENT))
+        return;
+
+    if (out.isEmpty()) {
+        out.texture_id = texture_id;
+    } else {
+        // Single mesh cannot use two different textures.
+        std.debug.assert(out.texture_id.eql(texture_id));
+    }
+
+    const n: u32 = @intCast(path.len);
+    if (feathering > 0.0) {
+        if (cwSignedArea(path) < 0.0) {
+            // Wrong winding order - fix:
+            std.mem.reverse(PathPoint, path);
+            for (path) |*point| {
+                point.normal = -point.normal;
+            }
+        }
+
+        try out.reserveTriangles(@as(usize, @intCast(3 * n)));
+        try out.reserveVertices(@as(usize, @intCast(2 * n)));
+        const color_outer = Color.Color32.TRANSPARENT;
+        const idx_inner: u32 = @intCast(out.vertices.items.len);
+        const idx_outer = idx_inner + 1;
+        // The fill:
+        for (2..n) |i| {
+            try out.addTriangle(idx_inner + 2 * (@as(u32, @intCast(i)) - 1), idx_inner, idx_inner + 2 * @as(u32, @intCast(i)));
+        }
+
+        // The feathering:
+        var @"i0": u32 = n - 1;
+        for (0..n) |@"i1"| {
+            const p1 = &path[@"i1"];
+            const dm = Vec2.splat(0.5 * feathering) * p1.normal;
+
+            // This part is different from `fillClosedPath`.
+            const pos1 = p1.pos - dm;
+            try out.vertices.append(.{
+                .pos = pos1,
+                .uv = uvForPos(pos1, rect_to_fill, rect_in_texture),
+                .color = color,
+            });
+            const pos2 = p1.pos + dm;
+            try out.vertices.append(.{
+                .pos = pos2,
+                .uv = uvForPos(pos2, rect_to_fill, rect_in_texture),
+                .color = color_outer,
+            });
+
+            try out.addTriangle(idx_inner + @as(u32, @intCast(@"i1")) * 2, idx_inner + @"i0" * 2, idx_outer + 2 * @"i0");
+            try out.addTriangle(idx_outer + @"i0" * 2, idx_outer + @as(u32, @intCast(@"i1")) * 2, idx_inner + 2 * @as(u32, @intCast(@"i1")));
+            @"i0" = @as(u32, @intCast(@"i1"));
+        }
+    } else {
+        try out.reserveTriangles(@as(usize, @intCast(n)));
+        const idx: u32 = @intCast(out.vertices.items.len);
+
+        const added_vertices = try out.vertices.addManyAsSlice(path.len);
+        for (added_vertices, path) |*added_vertex, p| {
+            // The only difference from `fillClosedPath` is that instead of `Mesh.WHITE_UV`
+            // we use `uvFromPos (p.pos)`.
+            added_vertex.* = .{ .pos = p.pos, .uv = uvForPos(p.pos, rect_to_fill, rect_in_texture), .color = color };
+        }
+
+        for (2..n) |i| {
+            try out.addTriangle(idx, idx + @as(u32, @intCast(i)) - 1, idx + @as(u32, @intCast(i)));
+        }
+    }
+}
 
 /// Tessellate the given path as a stroke with thickness.
 fn strokePath(
@@ -1068,7 +1186,22 @@ pub const T = struct {
     }
 
     // TODO: Translate `tessellateMesh` from Rust to Zig.
-    // TODO: Translate `tessellateLine` from Rust to Zig.
+
+    /// Tessellate a line segment between the two points with the given stroke into a [`Mesh`].
+    ///
+    /// * `shape`: the mesh to tessellate.
+    /// * `out`: triangles are appended to this.
+    pub fn tessellateLine(self: *T, points: [2]Pos2.T, stroke: Stroke.T, out: *Mesh.T) Allocator.Error!void {
+        if (stroke.isEmpty())
+            return;
+        if (self.options.coarse_tessellation_culling and
+            !self.clip_rect.intersects(Rect.fromTwoPos(points[0], points[1]).expand(stroke.width)))
+            return;
+
+        self.scratchpad_path.clear();
+        try self.scratchpad_path.addLineSegment(points);
+        try self.scratchpad_path.strokeOpen(self.feathering, stroke, out);
+    }
 
     /// Tessellate a single [`PathShape`] into a [`Mesh`].
     ///
@@ -1103,7 +1236,92 @@ pub const T = struct {
         try self.scratchpad_path.stroke(self.feathering, typ, stroke, out);
     }
 
-    // TODO: Translate `tessellateRect` from Rust to Zig.
+    /// Tessellate a single [`Rect`] into a [`Mesh`].
+    ///
+    /// * `rect`: the rectangle to tessellate.
+    /// * `out`: triangles are appended to this.
+    pub fn tessellateRect(self: *T, rect0: Shape.Rect, out: *Mesh.T) Allocator.Error!void {
+        var rect = rect0.rect;
+        var rounding = rect0.rounding;
+        const fill = rect0.fill;
+        const stroke = rect0.stroke;
+        var blur_width = rect0.blur_width;
+        const fill_texture_id = rect0.fill_texture_id;
+        const uv = rect0.uv;
+
+        if (self.options.coarse_tessellation_culling and !rect.expand(stroke.width).intersects(self.clip_rect))
+            return;
+
+        if (rect.isNegative())
+            return;
+
+        // It is common to (sometimes accidentally) create an infinitely sized rectangle.
+        // Make sure we can handle that:
+        rect.min = @max(rect.min, Pos2.T{ -1e7, -1e7 });
+        rect.max = @min(rect.max, Pos2.T{ 1e7, 1e7 });
+        const old_feathering = self.feathering;
+        if (old_feathering < blur_width) {
+            // We accomplish the blur by using a larger-than-normal feathering.
+            // Feathering is usually used to make the edges of a shape softer for anti-aliasing.
+            // The tessellator can't handle blurring/feathering larger than the smallest side of the rect.
+            // Thats because the tessellator approximate very thin rectangles as line segments,
+            // and these line segments don't have rounded corners.
+            // When the feathering is small (the size of a pixel), this is usually fine,
+            // but here we have a huge feathering to simulate blur,
+            // so we need to avoid this optimization in the tessellator,
+            // which is also why we add this rather big epsilon:
+            const eps = 0.1;
+            blur_width = std.math.clamp(blur_width, 0.0, @reduce(.Min, rect.size()) - eps);
+            rounding = rounding.add(Shape.Rounding.same(0.5 * blur_width));
+            self.feathering = @max(self.feathering, blur_width);
+        }
+        if (rect.width() < self.feathering) {
+            // Very thin - approximate by a vertical line-segment:
+            const line = [_]Pos2.T{ rect.centerTop(), rect.centerBottom() };
+            if (!fill.eql(Color.Color32.TRANSPARENT)) {
+                try self.tessellateLine(line, .{ .width = rect.width(), .color = fill }, out);
+            }
+            if (!stroke.isEmpty()) {
+                try self.tessellateLine(line, stroke, out); // back…
+                try self.tessellateLine(line, stroke, out); // …and forth
+
+            }
+        } else if (rect.height() < self.feathering) {
+            // Very thin - approximate by a horizontal line-segment:
+            const line = [_]Pos2.T{ rect.leftCenter(), rect.rightCenter() };
+            if (!fill.eql(Color.Color32.TRANSPARENT)) {
+                try self.tessellateLine(line, .{ .width = rect.height(), .color = fill }, out);
+            }
+            if (!stroke.isEmpty()) {
+                try self.tessellateLine(line, stroke, out); // back…
+                try self.tessellateLine(line, stroke, out); // …and forth
+
+            }
+        } else {
+            const path = &self.scratchpad_path;
+            path.clear();
+            try path_module.roundedRectangle(&self.scratchpad_points, rect, rounding);
+            try path.addLineLoop(self.scratchpad_points.items);
+            if (uv.isPositive()) {
+                // Textured
+                try path.fillWithUv(
+                    self.feathering,
+                    fill,
+                    fill_texture_id,
+                    rect,
+                    uv,
+                    out,
+                );
+            } else {
+                // Untextured
+                try path.fill(self.feathering, fill, out);
+            }
+            try path.strokeClosed(self.feathering, stroke, out);
+        }
+        self.feathering = old_feathering; // restore
+
+    }
+
     // TODO: Translate `tessellateText` from Rust to Zig.
     // TODO: Translate `tessellateQuadraticBezier` from Rust to Zig.
     // TODO: Translate `tessellateCubicBezier` from Rust to Zig.
