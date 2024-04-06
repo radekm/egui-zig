@@ -98,6 +98,12 @@ pub fn init(app: *App) !void {
             Color.Color32.BLUE,
             .{ .width = 2, .color = Color.Color32.WHITE },
         ), &mesh);
+        try tessellator.tessellateQuadraticBezier(.{
+            .points = [3]Pos2.T{ .{ 450, 250 }, .{ 500, 400 }, .{ 550, 250 } },
+            .closed = true,
+            .fill = Color.Color32.GOLD,
+            .stroke = .{ .width = 2, .color = Color.Color32.WHITE },
+        }, &mesh);
     }
     vertices = mesh.vertices.items;
     index_data = mesh.indices.items;

@@ -1,9 +1,12 @@
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 
 const m = @import("../emath/lib.zig");
 const Pos2 = m.Pos2;
+const RectTransform = m.RectTransform;
 const Vec2 = m.Vec2;
 
+const BezierFlattening = @import("BezierFlattening.zig");
 const Color = @import("Color.zig");
 const Stroke = @import("Stroke.zig");
 const Texture = @import("Texture.zig");
@@ -310,5 +313,166 @@ pub const Rounding = struct {
             .sw = self.sw - rhs.sw,
             .se = self.se - rhs.se,
         };
+    }
+};
+
+// ----------------------------------------------------------------------------
+
+/// A quadratic [Bézier Curve](https://en.wikipedia.org/wiki/B%C3%A9zier_curve).
+///
+/// See also [`CubicBezierShape`].
+pub const QuadraticBezier = struct {
+    /// The first point is the starting point and the last one is the ending point of the curve.
+    /// The middle point is the control points.
+    points: [3]Pos2.T,
+    closed: bool,
+    fill: Color.Color32,
+    stroke: Stroke.T,
+
+    /// Transform the curve with the given transform.
+    pub fn transform(self: QuadraticBezier, transform0: RectTransform.T) QuadraticBezier {
+        var points = [1]Pos2.T{Pos2.ZERO} ** 3;
+        for (self.points, 0..) |origin_point, i| {
+            points[i] = transform0.transformPos(origin_point);
+        }
+        return .{
+            .points = points,
+            .closed = self.closed,
+            .fill = self.fill,
+            .stroke = self.stroke,
+        };
+    }
+
+    /// Convert the quadratic Bézier curve to one [`PathShape`].
+    /// The `tolerance` will be used to control the max distance between the curve and the base line.
+    pub fn toPath(self: QuadraticBezier, allocator: Allocator, tolerance: ?f32) Allocator.Error!Path {
+        const points = try self.flatten(allocator, tolerance);
+        return .{
+            .points = points,
+            .closed = self.closed,
+            .fill = self.fill,
+            .stroke = self.stroke,
+        };
+    }
+
+    /// The visual bounding rectangle (includes stroke width)
+    pub fn visualBoundingRect(self: QuadraticBezier) m.Rect.T {
+        return if (self.fill.eql(Color.Color32.TRANSPARENT) and self.stroke.isEmpty())
+            m.Rect.NOTHING
+        else
+            self.logicalBoundingRect().expand(self.stroke.width / 2.0);
+    }
+
+    fn quadraticForEachLocalExtremum(p0: f32, p1: f32, p2: f32) ?f32 {
+        // A quadratic Bézier curve can be derived by a linear function:
+        // p(t) = p0 + t(p1 - p0) + t^2(p2 - 2p1 + p0)
+        // The derivative is:
+        // p'(t) = (p1 - p0) + 2(p2 - 2p1 + p0)t or:
+        // f(x) = a* x + b
+        const a = p2 - 2.0 * p1 + p0;
+        // let b = p1 - p0;
+        // no need to check for zero, since we're only interested in local extrema
+        if (a == 0.0)
+            return null;
+
+        const t = (p0 - p1) / a;
+        if (t > 0.0 and t < 1.0)
+            return t
+        else
+            return null;
+    }
+
+    /// Logical bounding rectangle (ignoring stroke width)
+    pub fn logicalBoundingRect(self: QuadraticBezier) m.Rect.T {
+        var min_x = self.points[0][0];
+        var max_x = self.points[2][0];
+        if (min_x > max_x) std.mem.swap(f32, &min_x, &max_x);
+        var min_y = self.points[0][1];
+        var max_y = self.points[2][1];
+        if (min_y > max_y) std.mem.swap(f32, &min_y, &max_y);
+
+        if (quadraticForEachLocalExtremum(self.points[0][0], self.points[1][0], self.points[2][0])) |t| {
+            const x = self.sample(t)[0];
+            if (x < min_x) {
+                min_x = x;
+            }
+            if (x > max_x) {
+                max_x = x;
+            }
+        }
+
+        if (quadraticForEachLocalExtremum(self.points[0][1], self.points[1][1], self.points[2][1])) |t| {
+            const y = self.sample(t)[1];
+            if (y < min_y) {
+                min_y = y;
+            }
+            if (y > max_y) {
+                max_y = y;
+            }
+        }
+
+        return .{
+            .min = .{ min_x, min_y },
+            .max = .{ max_x, max_y },
+        };
+    }
+
+    /// Calculate the point (x,y) at t based on the quadratic Bézier curve equation.
+    /// t is in [0.0,1.0]
+    /// [Bézier Curve](https://en.wikipedia.org/wiki/B%C3%A9zier_curve#Quadratic_B.C3.A9zier_curves)
+    ///
+    pub fn sample(self: QuadraticBezier, t: f32) Pos2.T {
+        std.debug.assert(t >= 0.0 and t <= 1.0); // The sample value should be in [0.0,1.0].
+        const h = 1.0 - t;
+        const a = t * t;
+        const b = 2.0 * t * h;
+        const c = h * h;
+        const result = self.points[2] * Vec2.splat(a) + self.points[1] * Vec2.splat(b) + self.points[0] * Vec2.splat(c);
+        return result;
+    }
+
+    /// find a set of points that approximate the quadratic Bézier curve.
+    /// the number of points is determined by the tolerance.
+    /// the points may not be evenly distributed in the range [0.0,1.0] (t value)
+    pub fn flatten(self: QuadraticBezier, allocator: Allocator, tolerance0: ?f32) Allocator.Error!std.ArrayList(Pos2.T) {
+        const tolerance = tolerance0 orelse @abs(self.points[0][0] - self.points[2][0]) * 0.001;
+        var result = std.ArrayList(Pos2.T).init(allocator);
+        errdefer result.deinit();
+        try result.append(self.points[0]);
+
+        const callback = struct {
+            context: *std.ArrayList(Pos2.T),
+            fn run(selfNested: @This(), p: Pos2.T, t: f32) Allocator.Error!void {
+                _ = t;
+                try selfNested.context.append(p);
+            }
+        }{ .context = &result };
+        try self.forEachFlattenedWithT(tolerance, callback);
+        return result;
+    }
+
+    // copied from https://docs.rs/lyon_geom/latest/lyon_geom/
+    /// Compute a flattened approximation of the curve, invoking a callback at
+    /// each step.
+    ///
+    /// The callback takes the point and corresponding curve parameter at each step.
+    ///
+    /// This implements the algorithm described by Raph Levien at
+    /// <https://raphlinus.github.io/graphics/curves/2019/12/23/flatten-quadbez.html>
+    pub fn forEachFlattenedWithT(
+        self: QuadraticBezier,
+        tolerance: f32,
+        callback: anytype,
+    ) Allocator.Error!void {
+        const params = BezierFlattening.Parameters.fromCurve(self, tolerance);
+        if (params.is_point) {
+            return;
+        }
+        const count: u32 = @intFromFloat(params.count);
+        for (1..count) |index| {
+            const t = params.tAtIteration(@floatFromInt(index));
+            try callback.run(self.sample(t), t);
+        }
+        try callback.run(self.sample(1.0), 1.0);
     }
 };

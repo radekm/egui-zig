@@ -742,8 +742,8 @@ fn uvForPos(pos: Pos2.T, rect_to_fill: Rect.T, rect_in_texture: Rect.T) Pos2.T {
     const from_y = rect_to_fill.yRange();
     const to_y = rect_in_texture.yRange();
     return .{
-        m.remap(f32, pos[0], from_x.min, from_x.max, to_x.min, to_x.max),
-        m.remap(f32, pos[1], from_y.min, from_y.max, to_y.min, to_y.max),
+        m.remap(pos[0], from_x, to_x),
+        m.remap(pos[1], from_y, to_y),
     };
 }
 
@@ -1323,9 +1323,62 @@ pub const T = struct {
     }
 
     // TODO: Translate `tessellateText` from Rust to Zig.
-    // TODO: Translate `tessellateQuadraticBezier` from Rust to Zig.
+
+    /// Tessellate a single [`QuadraticBezierShape`] into a [`Mesh`].
+    ///
+    /// * `quadratic_shape`: the shape to tessellate.
+    /// * `out`: triangles are appended to this.
+    pub fn tessellateQuadraticBezier(
+        self: *T,
+        quadratic: Shape.QuadraticBezier,
+        out: *Mesh.T,
+    ) Allocator.Error!void {
+        const options = self.options;
+        const clip_rect = self.clip_rect;
+        if (options.coarse_tessellation_culling and !quadratic.visualBoundingRect().intersects(clip_rect))
+            return;
+
+        const points = try quadratic.flatten(self.allocator, options.bezier_tolerance);
+        defer points.deinit();
+        try self.tessellateBezierComplete(
+            points.items,
+            quadratic.fill,
+            quadratic.closed,
+            quadratic.stroke,
+            out,
+        );
+    }
+
     // TODO: Translate `tessellateCubicBezier` from Rust to Zig.
-    // TODO: Translate `tessellateBezierComplete` from Rust to Zig.
+
+    fn tessellateBezierComplete(
+        self: *T,
+        points: []Pos2.T,
+        fill: Color.Color32,
+        closed: bool,
+        stroke: Stroke.T,
+        out: *Mesh.T,
+    ) Allocator.Error!void {
+        if (points.len < 2)
+            return;
+
+        self.scratchpad_path.clear();
+        if (closed) {
+            try self.scratchpad_path.addLineLoop(points);
+        } else {
+            try self.scratchpad_path.addOpenPoints(points);
+        }
+        if (!fill.eql(Color.Color32.TRANSPARENT)) {
+            std.debug.assert(closed); // You asked to fill a path that is not closed. That makes no sense.
+            try self.scratchpad_path.fill(self.feathering, fill, out);
+        }
+        const typ: PathType = if (closed)
+            .closed
+        else
+            .open;
+        try self.scratchpad_path.stroke(self.feathering, typ, stroke, out);
+    }
+
     // TODO: Translate `addClipRects` from Rust to Zig.
 };
 
