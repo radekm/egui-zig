@@ -1349,7 +1349,30 @@ pub const T = struct {
         );
     }
 
-    // TODO: Translate `tessellateCubicBezier` from Rust to Zig.
+    /// Tessellate a single [`CubicBezierShape`] into a [`Mesh`].
+    ///
+    /// * `cubic_shape`: the shape to tessellate.
+    /// * `out`: triangles are appended to this.
+    pub fn tessellateCubicBezier(self: *T, cubic: Shape.CubicBezier, out: *Mesh.T) Allocator.Error!void {
+        const options = self.options;
+        const clip_rect = self.clip_rect;
+        if (options.coarse_tessellation_culling and !cubic.visualBoundingRect().intersects(clip_rect))
+            return;
+
+        const points_bounded_array = try cubic.flattenClosed(self.allocator, options.bezier_tolerance, options.epsilon);
+        defer for (points_bounded_array.slice()) |points| {
+            points.deinit();
+        };
+        for (points_bounded_array.slice()) |points| {
+            try self.tessellateBezierComplete(
+                points.items,
+                cubic.fill,
+                cubic.closed,
+                cubic.stroke,
+                out,
+            );
+        }
+    }
 
     fn tessellateBezierComplete(
         self: *T,

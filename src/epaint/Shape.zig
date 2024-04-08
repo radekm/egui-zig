@@ -3,6 +3,7 @@ const Allocator = std.mem.Allocator;
 
 const m = @import("../emath/lib.zig");
 const Pos2 = m.Pos2;
+const Rangef = m.Rangef;
 const RectTransform = m.RectTransform;
 const Vec2 = m.Vec2;
 
@@ -442,9 +443,9 @@ pub const QuadraticBezier = struct {
 
         const callback = struct {
             context: *std.ArrayList(Pos2.T),
-            fn run(selfNested: @This(), p: Pos2.T, t: f32) Allocator.Error!void {
+            fn run(self_nested: @This(), p: Pos2.T, t: f32) Allocator.Error!void {
                 _ = t;
-                try selfNested.context.append(p);
+                try self_nested.context.append(p);
             }
         }{ .context = &result };
         try self.forEachFlattenedWithT(tolerance, callback);
@@ -469,10 +470,438 @@ pub const QuadraticBezier = struct {
             return;
         }
         const count: u32 = @intFromFloat(params.count);
-        for (1..count) |index| {
-            const t = params.tAtIteration(@floatFromInt(index));
-            try callback.run(self.sample(t), t);
+        // Following if protects from integer overflow which would happen
+        // if start of range is bigger than end.
+        if (count >= 1) {
+            for (1..count) |index| {
+                const t = params.tAtIteration(@floatFromInt(index));
+                try callback.run(self.sample(t), t);
+            }
         }
         try callback.run(self.sample(1.0), 1.0);
+    }
+};
+
+// ----------------------------------------------------------------------------
+
+/// A cubic [Bézier Curve](https://en.wikipedia.org/wiki/B%C3%A9zier_curve).
+///
+/// See also [`QuadraticBezierShape`].
+pub const CubicBezier = struct {
+    /// The first point is the starting point and the last one is the ending point of the curve.
+    /// The middle points are the control points.
+    points: [4]Pos2.T,
+    closed: bool,
+    fill: Color.Color32,
+    stroke: Stroke.T,
+
+    /// Transform the curve with the given transform.
+    pub fn transform(self: CubicBezier, transform0: RectTransform.T) CubicBezier {
+        var points = [1]Pos2.T{Pos2.ZERO} ** 4;
+        for (self.points, 0..) |origin_point, i| {
+            points[i] = transform0.transformPos(origin_point);
+        }
+        return .{
+            .points = points,
+            .closed = self.closed,
+            .fill = self.fill,
+            .stroke = self.stroke,
+        };
+    }
+
+    /// Convert the cubic Bézier curve to one or two [`PathShape`]'s.
+    /// When the curve is closed and it has to intersect with the base line, it will be converted into two shapes.
+    /// Otherwise, it will be converted into one shape.
+    /// The `tolerance` will be used to control the max distance between the curve and the base line.
+    /// The `epsilon` is used when comparing two floats.
+    pub fn toPath(
+        self: CubicBezier,
+        allocator: Allocator,
+        tolerance: ?f32,
+        epsilon: ?f32,
+    ) Allocator.Error!std.ArrayList(Path) {
+        var paths = std.ArrayList(Path).init(allocator);
+        errdefer paths.deinit();
+
+        var points_bounded_array = try self.flattenClosed(allocator, tolerance, epsilon);
+        errdefer for (points_bounded_array.slice()) |points| {
+            points.deinit();
+        };
+
+        for (points_bounded_array.slice()) |points| {
+            const path = Path{
+                .points = points,
+                .closed = self.closed,
+                .fill = self.fill,
+                .stroke = self.stroke,
+            };
+            try paths.append(path);
+        }
+
+        return paths;
+    }
+
+    /// The visual bounding rectangle (includes stroke width)
+    pub fn visualBoundingRect(self: CubicBezier) m.Rect.T {
+        return if (self.fill.eql(Color.Color32.TRANSPARENT) and self.stroke.isEmpty())
+            m.Rect.NOTHING
+        else
+            self.logicalBoundingRect().expand(self.stroke.width / 2.0);
+    }
+
+    fn inRange(t: f32) bool {
+        return 0.0 <= t and t <= 1.0;
+    }
+
+    fn cubicForEachLocalExtremum(p0: f32, p1: f32, p2: f32, p3: f32) std.BoundedArray(f32, 2) {
+        // See www.faculty.idc.ac.il/arik/quality/appendixa.html for an explanation
+        // A cubic Bézier curve can be derivated by the following equation:
+        // B'(t) = 3(1-t)^2(p1-p0) + 6(1-t)t(p2-p1) + 3t^2(p3-p2) or
+        // f(x) = a * x² + b * x + c
+        const a = 3.0 * (p3 + 3.0 * (p1 - p2) - p0);
+        const b = 6.0 * (p2 - 2.0 * p1 + p0);
+        const c = 3.0 * (p1 - p0);
+
+        var result = std.BoundedArray(f32, 2).init(0) catch unreachable;
+
+        // linear situation
+        if (a == 0.0) {
+            if (b != 0.0) {
+                const t = -c / b;
+                if (inRange(t)) {
+                    result.append(t) catch unreachable;
+                }
+            }
+            return result;
+        }
+        const discr = b * b - 4.0 * a * c;
+        // no Real solution
+        if (discr < 0.0) {
+            return result;
+        }
+        // one Real solution
+        if (discr == 0.0) {
+            const t = -b / (2.0 * a);
+            if (inRange(t)) {
+                result.append(t) catch unreachable;
+            }
+            return result;
+        }
+
+        // two Real solutions
+        const discrSqrt = @sqrt(discr);
+        const t1 = (-b - discrSqrt) / (2.0 * a);
+        const t2 = (-b + discrSqrt) / (2.0 * a);
+        if (inRange(t1)) {
+            result.append(t1) catch unreachable;
+        }
+        if (inRange(t2)) {
+            result.append(t2) catch unreachable;
+        }
+
+        return result;
+    }
+
+    /// Logical bounding rectangle (ignoring stroke width)
+    pub fn logicalBoundingRect(self: CubicBezier) m.Rect.T {
+        // temporary solution
+        var min_x = self.points[0][0];
+        var max_x = self.points[3][0];
+        if (min_x > max_x) std.mem.swap(f32, &min_x, &max_x);
+        var min_y = self.points[0][1];
+        var max_y = self.points[3][1];
+        if (min_y > max_y) std.mem.swap(f32, &min_y, &max_y);
+
+        // find the inflection points and get the x value
+        for (cubicForEachLocalExtremum(
+            self.points[0][0],
+            self.points[1][0],
+            self.points[2][0],
+            self.points[3][0],
+        ).slice()) |t| {
+            const x = self.sample(t)[0];
+            if (x < min_x) {
+                min_x = x;
+            }
+            if (x > max_x) {
+                max_x = x;
+            }
+        }
+
+        // find the inflection points and get the y value
+        for (cubicForEachLocalExtremum(
+            self.points[0][1],
+            self.points[1][1],
+            self.points[2][1],
+            self.points[3][1],
+        ).slice()) |t| {
+            const y = self.sample(t)[1];
+            if (y < min_y) {
+                min_y = y;
+            }
+            if (y > max_y) {
+                max_y = y;
+            }
+        }
+
+        return .{
+            .min = .{ min_x, min_y },
+            .max = .{ max_x, max_y },
+        };
+    }
+
+    /// Calculate the point (x,y) at t based on the cubic Bézier curve equation.
+    /// t is in [0.0,1.0]
+    /// [Bézier Curve](https://en.wikipedia.org/wiki/B%C3%A9zier_curve#Cubic_B.C3.A9zier_curves)
+    ///
+    pub fn sample(self: CubicBezier, t: f32) Pos2.T {
+        std.debug.assert(inRange(t)); // The sample value should be in [0.0,1.0].
+        const h = 1.0 - t;
+        const a = t * t * t;
+        const b = 3.0 * t * t * h;
+        const c = 3.0 * t * h * h;
+        const d = h * h * h;
+        const result =
+            self.points[3] * Vec2.splat(a) +
+            self.points[2] * Vec2.splat(b) +
+            self.points[1] * Vec2.splat(c) +
+            self.points[0] * Vec2.splat(d);
+        return result;
+    }
+
+    /// Find out the t value for the point where the curve is intersected with the base line.
+    /// The base line is the line from P0 to P3.
+    /// If the curve only has two intersection points with the base line, they should be 0.0 and 1.0.
+    /// In this case, the "fill" will be simple since the curve is a convex line.
+    /// If the curve has more than two intersection points with the base line, the "fill" will be a problem.
+    /// We need to find out where is the 3rd t value (0<t<1)
+    /// And the original cubic curve will be split into two curves (0.0..t and t..1.0).
+    /// B(t) = (1-t)^3*P0 + 3*t*(1-t)^2*P1 + 3*t^2*(1-t)*P2 + t^3*P3
+    /// or B(t) = (P3 - 3*P2 + 3*P1 - P0)*t^3 + (3*P2 - 6*P1 + 3*P0)*t^2 + (3*P1 - 3*P0)*t + P0
+    /// this B(t) should be on the line between P0 and P3. Therefore:
+    /// (B.x - P0.x)/(P3.x - P0.x) = (B.y - P0.y)/(P3.y - P0.y), or:
+    /// B.x * (P3.y - P0.y) - B.y * (P3.x - P0.x) + P0.x * (P0.y - P3.y) + P0.y * (P3.x - P0.x) = 0
+    /// B.x = (P3.x - 3 * P2.x + 3 * P1.x - P0.x) * t^3 + (3 * P2.x - 6 * P1.x + 3 * P0.x) * t^2 + (3 * P1.x - 3 * P0.x) * t + P0.x
+    /// B.y = (P3.y - 3 * P2.y + 3 * P1.y - P0.y) * t^3 + (3 * P2.y - 6 * P1.y + 3 * P0.y) * t^2 + (3 * P1.y - 3 * P0.y) * t + P0.y
+    /// Combine the above three equations and iliminate B.x and B.y, we get:
+    /// t^3 * ( (P3.x - 3*P2.x + 3*P1.x - P0.x) * (P3.y - P0.y) - (P3.y - 3*P2.y + 3*P1.y - P0.y) * (P3.x - P0.x))
+    /// + t^2 * ( (3 * P2.x - 6 * P1.x + 3 * P0.x) * (P3.y - P0.y) - (3 * P2.y - 6 * P1.y + 3 * P0.y) * (P3.x - P0.x))
+    /// + t^1 * ( (3 * P1.x - 3 * P0.x) * (P3.y - P0.y) - (3 * P1.y - 3 * P0.y) * (P3.x - P0.x))
+    /// + (P0.x * (P3.y - P0.y) - P0.y * (P3.x - P0.x)) + P0.x * (P0.y - P3.y) + P0.y * (P3.x - P0.x)
+    /// = 0
+    /// or a * t^3 + b * t^2 + c * t + d = 0
+    ///
+    /// let x = t - b / (3 * a), then we have:
+    /// x^3 + p * x + q = 0, where:
+    /// p = (3.0 * a * c - b^2) / (3.0 * a^2)
+    /// q = (2.0 * b^3 - 9.0 * a * b * c + 27.0 * a^2 * d) / (27.0 * a^3)
+    ///
+    /// when p > 0, there will be one real root, two complex roots
+    /// when p = 0, there will be two real roots, when p=q=0, there will be three real roots but all 0.
+    /// when p < 0, there will be three unique real roots. this is what we need. (x1, x2, x3)
+    ///  t = x + b / (3 * a), then we have: t1, t2, t3.
+    /// the one between 0.0 and 1.0 is what we need.
+    /// <`https://baike.baidu.com/item/%E4%B8%80%E5%85%83%E4%B8%89%E6%AC%A1%E6%96%B9%E7%A8%8B/8388473 /`>
+    ///
+    pub fn findCrossT(self: CubicBezier, epsilon: f32) ?f32 {
+        const p0 = self.points[0];
+        const p1 = self.points[1];
+        const p2 = self.points[2];
+        const p3 = self.points[3];
+        const a = (p3[0] - 3.0 * p2[0] + 3.0 * p1[0] - p0[0]) * (p3[1] - p0[1]) - (p3[1] - 3.0 * p2[1] + 3.0 * p1[1] - p0[1]) * (p3[0] - p0[0]);
+        const b = (3.0 * p2[0] - 6.0 * p1[0] + 3.0 * p0[0]) * (p3[1] - p0[1]) - (3.0 * p2[1] - 6.0 * p1[1] + 3.0 * p0[1]) * (p3[0] - p0[0]);
+        const c = (3.0 * p1[0] - 3.0 * p0[0]) * (p3[1] - p0[1]) - (3.0 * p1[1] - 3.0 * p0[1]) * (p3[0] - p0[0]);
+        const d = p0[0] * (p3[1] - p0[1]) - p0[1] * (p3[0] - p0[0]) + p0[0] * (p0[1] - p3[1]) + p0[1] * (p3[0] - p0[0]);
+        const h = -b / (3.0 * a);
+        const p = (3.0 * a * c - b * b) / (3.0 * a * a);
+        const q = (2.0 * b * b * b - 9.0 * a * b * c + 27.0 * a * a * d) / (27.0 * a * a * a);
+        if (p > 0.0) {
+            return null;
+        }
+        const r = @sqrt(-1.0 * std.math.pow(f32, p / 3.0, 3));
+        const theta = std.math.acos(-1.0 * q / (2.0 * r)) / 3.0;
+        const t1 = 2.0 * std.math.cbrt(r) * @cos(theta) + h;
+        const t2 = 2.0 * std.math.cbrt(r) * @cos(theta + 120.0 * @as(f32, std.math.pi) / 180.0) + h;
+        const t3 = 2.0 * std.math.cbrt(r) * @cos(theta + 240.0 * @as(f32, std.math.pi) / 180.0) + h;
+        if (t1 > epsilon and t1 < 1.0 - epsilon) {
+            return t1;
+        }
+        if (t2 > epsilon and t2 < 1.0 - epsilon) {
+            return t2;
+        }
+        if (t3 > epsilon and t3 < 1.0 - epsilon) {
+            return t3;
+        }
+        return null;
+    }
+
+    /// find a set of points that approximate the cubic Bézier curve.
+    /// the number of points is determined by the tolerance.
+    /// the points may not be evenly distributed in the range [0.0,1.0] (t value)
+    /// this api will check whether the curve will cross the base line or not when closed = true.
+    /// The result will be a vec of vec of Pos2. it will store two closed aren in different vec.
+    /// The epsilon is used to compare a float value.
+    pub fn flattenClosed(
+        self: CubicBezier,
+        allocator: Allocator,
+        tolerance0: ?f32,
+        epsilon0: ?f32,
+    ) Allocator.Error!std.BoundedArray(std.ArrayList(Pos2.T), 2) {
+        const tolerance = tolerance0 orelse @abs(self.points[0][0] - self.points[3][0]) * 0.001;
+        const epsilon = epsilon0 orelse 1.0e-5;
+        var result = std.BoundedArray(std.ArrayList(Pos2.T), 2).init(0) catch unreachable;
+        var first_half = std.ArrayList(Pos2.T).init(allocator);
+        var second_half = std.ArrayList(Pos2.T).init(allocator);
+        var flipped = false;
+        try first_half.append(self.points[0]);
+        if (self.findCrossT(epsilon)) |cross| {
+            if (self.closed) {
+                const callback = struct {
+                    flipped: *bool,
+                    cross: f32,
+                    first_half: *std.ArrayList(Pos2.T),
+                    second_half: *std.ArrayList(Pos2.T),
+                    self: *const CubicBezier,
+                    fn run(self_nested: @This(), p: Pos2.T, t: f32) Allocator.Error!void {
+                        if (t < self_nested.cross) {
+                            try self_nested.first_half.append(p);
+                        } else {
+                            if (!self_nested.flipped.*) {
+                                // when just crossed the base line, flip the order of the points
+                                // add the cross point to the first half as the last point
+                                // and add the cross point to the second half as the first point
+                                self_nested.flipped.* = true;
+                                const cross_point = self_nested.self.sample(self_nested.cross);
+                                try self_nested.first_half.append(cross_point);
+                                try self_nested.second_half.append(cross_point);
+                            }
+                            try self_nested.second_half.append(p);
+                        }
+                    }
+                }{
+                    .flipped = &flipped,
+                    .cross = cross,
+                    .first_half = &first_half,
+                    .second_half = &second_half,
+                    .self = &self,
+                };
+                try self.forEachFlattenedWithT(tolerance, callback);
+            } else {
+                const callback = struct {
+                    first_half: *std.ArrayList(Pos2.T),
+                    fn run(self_nested: @This(), p: Pos2.T, t: f32) Allocator.Error!void {
+                        _ = t;
+                        try self_nested.first_half.append(p);
+                    }
+                }{ .first_half = &first_half };
+                try self.forEachFlattenedWithT(tolerance, callback);
+            }
+        } else {
+            const callback = struct {
+                first_half: *std.ArrayList(Pos2.T),
+                fn run(self_nested: @This(), p: Pos2.T, t: f32) Allocator.Error!void {
+                    _ = t;
+                    try self_nested.first_half.append(p);
+                }
+            }{ .first_half = &first_half };
+            try self.forEachFlattenedWithT(tolerance, callback);
+        }
+
+        result.append(first_half) catch unreachable;
+        if (second_half.items.len != 0) {
+            result.append(second_half) catch unreachable;
+        }
+        return result;
+    }
+
+    fn singleCurveApproximation(curve: CubicBezier) QuadraticBezier {
+        const c1_x = (curve.points[1][0] * 3.0 - curve.points[0][0]) * 0.5;
+        const c1_y = (curve.points[1][1] * 3.0 - curve.points[0][1]) * 0.5;
+        const c2_x = (curve.points[2][0] * 3.0 - curve.points[3][0]) * 0.5;
+        const c2_y = (curve.points[2][1] * 3.0 - curve.points[3][1]) * 0.5;
+        const c = Pos2.T{ (c1_x + c2_x) * 0.5, (c1_y + c2_y) * 0.5 };
+        return .{
+            .points = .{ curve.points[0], c, curve.points[3] },
+            .closed = curve.closed,
+            .fill = curve.fill,
+            .stroke = curve.stroke,
+        };
+    }
+
+    /// split the original cubic curve into a new one within a range.
+    pub fn splitRange(self: CubicBezier, t_range: Rangef.T) CubicBezier {
+        // Range should be in [0.0,1.0].
+        std.debug.assert(t_range.min >= 0.0 and t_range.max <= 1.0 and t_range.min <= t_range.max);
+        const from = self.sample(t_range.min);
+        const to = self.sample(t_range.max);
+        const d_from = self.points[1] - self.points[0];
+        const d_ctrl = self.points[2] - self.points[1];
+        const d_to = self.points[3] - self.points[2];
+        const q = QuadraticBezier{
+            .points = .{ d_from, d_ctrl, d_to },
+            .closed = self.closed,
+            .fill = self.fill,
+            .stroke = self.stroke,
+        };
+        const delta_t = t_range.max - t_range.min;
+        const q_start = q.sample(t_range.min);
+        const q_end = q.sample(t_range.max);
+        const ctrl1 = from + q_start * Vec2.splat(delta_t);
+        const ctrl2 = to - q_end * Vec2.splat(delta_t);
+        return .{
+            .points = .{ from, ctrl1, ctrl2, to },
+            .closed = self.closed,
+            .fill = self.fill,
+            .stroke = self.stroke,
+        };
+    }
+
+    // lyon_geom::flatten_cubic.rs
+    // copied from https://docs.rs/lyon_geom/latest/lyon_geom/
+    fn forEachFlattenedWithT(
+        curve: CubicBezier,
+        tolerance: f32,
+        callback: anytype,
+    ) Allocator.Error!void {
+        const quadratics_tolerance = tolerance * 0.2;
+        const flattening_tolerance = tolerance * 0.8;
+        const num_quadratics = curve.numQuadratics(quadratics_tolerance);
+        const step = 1.0 / @as(f32, @floatFromInt(num_quadratics));
+        const n = num_quadratics;
+        var t0: f32 = 0.0;
+
+        const callback2 = struct {
+            t0: *f32,
+            step: f32,
+            callback: @TypeOf(callback),
+            fn run(self_nested: @This(), point: Pos2.T, t_sub: f32) Allocator.Error!void {
+                const t = self_nested.t0.* + self_nested.step * t_sub;
+                try self_nested.callback.run(point, t);
+            }
+        }{ .t0 = &t0, .step = step, .callback = callback };
+
+        for (0..(n - 1)) |_| {
+            const t1 = t0 + step;
+            const quadratic = singleCurveApproximation(curve.splitRange(.{ .min = t0, .max = t1 }));
+            try quadratic.forEachFlattenedWithT(flattening_tolerance, callback2);
+            t0 = t1;
+        }
+
+        // Do the last step manually to make sure we finish at t = 1.0 exactly.
+        const quadratic = singleCurveApproximation(curve.splitRange(.{ .min = t0, .max = 1.0 }));
+        try quadratic.forEachFlattenedWithT(flattening_tolerance, callback2);
+    }
+
+    // copied from lyon::geom::flattern_cubic.rs
+    // Computes the number of quadratic bézier segments to approximate a cubic one.
+    // Derived by Raph Levien from section 10.6 of Sedeberg's CAGD notes
+    // https://scholarsarchive.byu.edu/cgi/viewcontent.cgi?article=1000&context=facpub#section.10.6
+    // and the error metric from the caffein owl blog post http://caffeineowl.com/graphics/2d/vectorial/cubic2quad01.html
+    pub fn numQuadratics(self: CubicBezier, tolerance: f32) u32 {
+        std.debug.assert(tolerance > 0.0); // the tolerance should be positive
+        const x = self.points[0][0] - 3.0 * self.points[1][0] + 3.0 * self.points[2][0] - self.points[3][0];
+        const y = self.points[0][1] - 3.0 * self.points[1][1] + 3.0 * self.points[2][1] - self.points[3][1];
+        const err = x * x + y * y;
+        return @intFromFloat(@max(@ceil(std.math.pow(f32, err / (432.0 * tolerance * tolerance), 1.0 / 6.0)), 1.0));
     }
 };

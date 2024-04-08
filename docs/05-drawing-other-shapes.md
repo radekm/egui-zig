@@ -115,12 +115,47 @@ try result.append(self.points[0]);
 
 const callback = struct {
     context: *std.ArrayList(Pos2.T),
-    fn run(selfNested: @This(), p: Pos2.T, t: f32) Allocator.Error!void {
+    fn run(self_nested: @This(), p: Pos2.T, t: f32) Allocator.Error!void {
         _ = t;
-        try selfNested.context.append(p);
+        try self_nested.context.append(p);
     }
 }{ .context = &result };
 try self.forEachFlattenedWithT(tolerance, callback);
 ```
 
 The lack of shadowing in Zig doesn't help either - we have to use `selfNested` instead of `self`.
+
+## Cubic bezier curve
+
+Translating cubic bezier curve is similar to quadratic bezier curve.
+The slight difference is that `cubicForEachLocalExtremum` returns at most two values
+instead of at most one value as was the case with `quadraticForEachLocalExtremum`.
+So instead of returning `?f32` we return `BoundedArray(f32, 2)`.
+
+For the other function taking lambda namely `for_each_flattened_with_t` for cubic beziers
+we use exactly the same trick as before. We replace Rust lambda parameter by parameter `callback: anytype`
+and in the body call `callback.run()`. And again it's uglier than in Rust
+but on the other hand everybody at least sees which variables belong to the closure.
+
+When running expanded `demo.zig` we found
+a problem with our translation of for loops. Following Rust for loop is totally fine
+
+```rust
+let count = params.count as u32;
+for index in 1..count {
+    // body
+}
+```
+
+But when translated to Zig
+
+```zig
+const count: u32 = @intFromFloat(params.count);
+for (1..count) |index| {
+    // body
+}
+```
+
+it may panic with integer overflow if upper bound `count` is smaller than lower bound `1`.
+We fixed the code by wrapping the whole for loop in `if` ensuring that `count` is at least `1`.
+Unfortunately similar problems may lurk elsewhere.

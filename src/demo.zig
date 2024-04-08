@@ -104,6 +104,18 @@ pub fn init(app: *App) !void {
             .fill = Color.Color32.GOLD,
             .stroke = .{ .width = 2, .color = Color.Color32.WHITE },
         }, &mesh);
+        try tessellator.tessellateCubicBezier(.{
+            .points = [4]Pos2.T{ .{ 450, 400 }, .{ 500, 550 }, .{ 500, 250 }, .{ 600, 400 } },
+            .closed = true,
+            .fill = Color.Color32.GOLD,
+            .stroke = .{ .width = 2, .color = Color.Color32.WHITE },
+        }, &mesh);
+        try tessellator.tessellateCubicBezier(.{
+            .points = [4]Pos2.T{ .{ 600, 300 }, .{ 650, 450 }, .{ 650, 350 }, .{ 750, 300 } },
+            .closed = false,
+            .fill = Color.Color32.TRANSPARENT,
+            .stroke = .{ .width = 2, .color = Color.Color32.GREEN },
+        }, &mesh);
     }
     vertices = mesh.vertices.items;
     index_data = mesh.indices.items;
