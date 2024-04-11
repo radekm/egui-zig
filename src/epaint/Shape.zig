@@ -1135,3 +1135,295 @@ pub const CubicBezier = struct {
         return @intFromFloat(@max(@ceil(std.math.pow(f32, err / (432.0 * tolerance * tolerance), 1.0 / 6.0)), 1.0));
     }
 };
+
+test "cubic bounding box" {
+    {
+        const curve = CubicBezier{
+            .points = [4]Pos2.T{ .{ 10.0, 10.0 }, .{ 110.0, 170.0 }, .{ 180.0, 30.0 }, .{ 270.0, 210.0 } },
+            .closed = false,
+            .fill = Color.Color32.TRANSPARENT,
+            .stroke = Stroke.NONE,
+        };
+        const bbox = curve.logicalBoundingRect();
+        try std.testing.expectEqual(10.0, bbox.min[0]);
+        try std.testing.expectEqual(10.0, bbox.min[1]);
+        try std.testing.expectEqual(270.0, bbox.max[0]);
+        try std.testing.expectEqual(210.0, bbox.max[1]);
+    }
+    {
+        const curve = CubicBezier{
+            .points = [4]Pos2.T{ .{ 10.0, 10.0 }, .{ 110.0, 170.0 }, .{ 270.0, 210.0 }, .{ 180.0, 30.0 } },
+            .closed = false,
+            .fill = Color.Color32.TRANSPARENT,
+            .stroke = Stroke.NONE,
+        };
+        const bbox = curve.logicalBoundingRect();
+        try std.testing.expectEqual(10.0, bbox.min[0]);
+        try std.testing.expectEqual(10.0, bbox.min[1]);
+        try std.testing.expectApproxEqAbs(206.50, bbox.max[0], 0.01);
+        try std.testing.expectApproxEqAbs(148.48, bbox.max[1], 0.01);
+    }
+    {
+        const curve = CubicBezier{
+            .points = [4]Pos2.T{ .{ 110.0, 170.0 }, .{ 10.0, 10.0 }, .{ 270.0, 210.0 }, .{ 180.0, 30.0 } },
+            .closed = false,
+            .fill = Color.Color32.TRANSPARENT,
+            .stroke = Stroke.NONE,
+        };
+        const bbox = curve.logicalBoundingRect();
+        try std.testing.expectApproxEqAbs(86.71, bbox.min[0], 0.01);
+        try std.testing.expectApproxEqAbs(30.0, bbox.min[1], 0.01);
+        try std.testing.expectApproxEqAbs(199.27, bbox.max[0], 0.01);
+        try std.testing.expectApproxEqAbs(170.0, bbox.max[1], 0.01);
+    }
+}
+
+test "cubic different tolerance flattening" {
+    const curve = CubicBezier{
+        .points = [4]Pos2.T{ .{ 0.0, 0.0 }, .{ 100.0, 0.0 }, .{ 100.0, 100.0 }, .{ 100.0, 200.0 } },
+        .closed = false,
+        .fill = Color.Color32.TRANSPARENT,
+        .stroke = Stroke.NONE,
+    };
+    {
+        var result = std.ArrayList(Pos2.T).init(std.testing.allocator);
+        defer result.deinit();
+
+        try result.append(curve.points[0]);
+
+        const callback = struct {
+            result: *std.ArrayList(Pos2.T),
+            fn run(self: @This(), pos: Pos2.T, t: f32) Allocator.Error!void {
+                _ = t;
+                try self.result.append(pos);
+            }
+        }{ .result = &result };
+        try curve.forEachFlattenedWithT(1.0, callback);
+
+        try std.testing.expectEqual(10, result.items.len);
+    }
+    {
+        var result = std.ArrayList(Pos2.T).init(std.testing.allocator);
+        defer result.deinit();
+
+        try result.append(curve.points[0]);
+
+        const callback = struct {
+            result: *std.ArrayList(Pos2.T),
+            fn run(self: @This(), pos: Pos2.T, t: f32) Allocator.Error!void {
+                _ = t;
+                try self.result.append(pos);
+            }
+        }{ .result = &result };
+        try curve.forEachFlattenedWithT(0.5, callback);
+
+        try std.testing.expectEqual(13, result.items.len);
+    }
+    {
+        var result = std.ArrayList(Pos2.T).init(std.testing.allocator);
+        defer result.deinit();
+
+        try result.append(curve.points[0]);
+
+        const callback = struct {
+            result: *std.ArrayList(Pos2.T),
+            fn run(self: @This(), pos: Pos2.T, t: f32) Allocator.Error!void {
+                _ = t;
+                try self.result.append(pos);
+            }
+        }{ .result = &result };
+        try curve.forEachFlattenedWithT(0.1, callback);
+
+        try std.testing.expectEqual(28, result.items.len);
+    }
+    {
+        var result = std.ArrayList(Pos2.T).init(std.testing.allocator);
+        defer result.deinit();
+
+        try result.append(curve.points[0]);
+
+        const callback = struct {
+            result: *std.ArrayList(Pos2.T),
+            fn run(self: @This(), pos: Pos2.T, t: f32) Allocator.Error!void {
+                _ = t;
+                try self.result.append(pos);
+            }
+        }{ .result = &result };
+        try curve.forEachFlattenedWithT(0.01, callback);
+
+        try std.testing.expectEqual(83, result.items.len);
+    }
+    {
+        var result = std.ArrayList(Pos2.T).init(std.testing.allocator);
+        defer result.deinit();
+
+        try result.append(curve.points[0]);
+
+        const callback = struct {
+            result: *std.ArrayList(Pos2.T),
+            fn run(self: @This(), pos: Pos2.T, t: f32) Allocator.Error!void {
+                _ = t;
+                try self.result.append(pos);
+            }
+        }{ .result = &result };
+        try curve.forEachFlattenedWithT(0.001, callback);
+
+        try std.testing.expectEqual(248, result.items.len);
+    }
+}
+
+test "cubic different shape flattening" {
+    {
+        const curve = CubicBezier{
+            .points = [4]Pos2.T{ .{ 90.0, 110.0 }, .{ 30.0, 170.0 }, .{ 210.0, 170.0 }, .{ 170.0, 110.0 } },
+            .closed = false,
+            .fill = Color.Color32.TRANSPARENT,
+            .stroke = Stroke.NONE,
+        };
+        var result = std.ArrayList(Pos2.T).init(std.testing.allocator);
+        defer result.deinit();
+
+        try result.append(curve.points[0]);
+
+        const callback = struct {
+            result: *std.ArrayList(Pos2.T),
+            fn run(self: @This(), pos: Pos2.T, t: f32) Allocator.Error!void {
+                _ = t;
+                try self.result.append(pos);
+            }
+        }{ .result = &result };
+        try curve.forEachFlattenedWithT(0.01, callback);
+
+        try std.testing.expectEqual(117, result.items.len);
+    }
+    {
+        const curve = CubicBezier{
+            .points = [4]Pos2.T{ .{ 90.0, 110.0 }, .{ 90.0, 170.0 }, .{ 170.0, 170.0 }, .{ 170.0, 110.0 } },
+            .closed = false,
+            .fill = Color.Color32.TRANSPARENT,
+            .stroke = Stroke.NONE,
+        };
+        var result = std.ArrayList(Pos2.T).init(std.testing.allocator);
+        defer result.deinit();
+
+        try result.append(curve.points[0]);
+
+        const callback = struct {
+            result: *std.ArrayList(Pos2.T),
+            fn run(self: @This(), pos: Pos2.T, t: f32) Allocator.Error!void {
+                _ = t;
+                try self.result.append(pos);
+            }
+        }{ .result = &result };
+        try curve.forEachFlattenedWithT(0.01, callback);
+
+        try std.testing.expectEqual(91, result.items.len);
+    }
+    {
+        const curve = CubicBezier{
+            .points = [4]Pos2.T{ .{ 90.0, 110.0 }, .{ 110.0, 170.0 }, .{ 150.0, 170.0 }, .{ 170.0, 110.0 } },
+            .closed = false,
+            .fill = Color.Color32.TRANSPARENT,
+            .stroke = Stroke.NONE,
+        };
+        var result = std.ArrayList(Pos2.T).init(std.testing.allocator);
+        defer result.deinit();
+
+        try result.append(curve.points[0]);
+
+        const callback = struct {
+            result: *std.ArrayList(Pos2.T),
+            fn run(self: @This(), pos: Pos2.T, t: f32) Allocator.Error!void {
+                _ = t;
+                try self.result.append(pos);
+            }
+        }{ .result = &result };
+        try curve.forEachFlattenedWithT(0.01, callback);
+
+        try std.testing.expectEqual(75, result.items.len);
+    }
+    {
+        const curve = CubicBezier{
+            .points = [4]Pos2.T{
+                .{ 90.0, 110.0 },
+                .{ 110.0, 170.0 },
+                .{ 230.0, 110.0 },
+                .{ 170.0, 110.0 },
+            },
+            .closed = false,
+            .fill = Color.Color32.TRANSPARENT,
+            .stroke = Stroke.NONE,
+        };
+        var result = std.ArrayList(Pos2.T).init(std.testing.allocator);
+        defer result.deinit();
+
+        try result.append(curve.points[0]);
+
+        const callback = struct {
+            result: *std.ArrayList(Pos2.T),
+            fn run(self: @This(), pos: Pos2.T, t: f32) Allocator.Error!void {
+                _ = t;
+                try self.result.append(pos);
+            }
+        }{ .result = &result };
+        try curve.forEachFlattenedWithT(0.01, callback);
+
+        try std.testing.expectEqual(100, result.items.len);
+    }
+    {
+        const curve = CubicBezier{
+            .points = [4]Pos2.T{
+                .{ 90.0, 110.0 },
+                .{ 110.0, 170.0 },
+                .{ 210.0, 70.0 },
+                .{ 170.0, 110.0 },
+            },
+            .closed = false,
+            .fill = Color.Color32.TRANSPARENT,
+            .stroke = Stroke.NONE,
+        };
+        var result = std.ArrayList(Pos2.T).init(std.testing.allocator);
+        defer result.deinit();
+
+        try result.append(curve.points[0]);
+
+        const callback = struct {
+            result: *std.ArrayList(Pos2.T),
+            fn run(self: @This(), pos: Pos2.T, t: f32) Allocator.Error!void {
+                _ = t;
+                try self.result.append(pos);
+            }
+        }{ .result = &result };
+        try curve.forEachFlattenedWithT(0.01, callback);
+
+        try std.testing.expectEqual(71, result.items.len);
+    }
+    {
+        const curve = CubicBezier{
+            .points = [4]Pos2.T{
+                .{ 90.0, 110.0 },
+                .{ 110.0, 170.0 },
+                .{ 150.0, 50.0 },
+                .{ 170.0, 110.0 },
+            },
+            .closed = false,
+            .fill = Color.Color32.TRANSPARENT,
+            .stroke = Stroke.NONE,
+        };
+        var result = std.ArrayList(Pos2.T).init(std.testing.allocator);
+        defer result.deinit();
+
+        try result.append(curve.points[0]);
+
+        const callback = struct {
+            result: *std.ArrayList(Pos2.T),
+            fn run(self: @This(), pos: Pos2.T, t: f32) Allocator.Error!void {
+                _ = t;
+                try self.result.append(pos);
+            }
+        }{ .result = &result };
+        try curve.forEachFlattenedWithT(0.01, callback);
+
+        try std.testing.expectEqual(88, result.items.len);
+    }
+}
