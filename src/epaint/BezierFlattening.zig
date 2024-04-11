@@ -40,7 +40,7 @@ pub const Parameters = struct {
 
         // the original author thinks it can be stored as integer if it's not generic.
         // but if so, we have to handle the edge case of the integral being infinite.
-        var count = (0.5 * @abs(integral_diff) * @ceil(@sqrt(scale / tolerance)));
+        var count = @ceil(0.5 * @abs(integral_diff) * @sqrt(scale / tolerance));
         var is_point = false;
         // If count is NaN the curve can be approximated by a single straight line or a point.
         if (!std.math.isFinite(count)) {

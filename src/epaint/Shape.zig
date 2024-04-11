@@ -482,6 +482,236 @@ pub const QuadraticBezier = struct {
     }
 };
 
+test "quadratic bounding box" {
+    {
+        const curve = QuadraticBezier{
+            .points = [3]Pos2.T{ .{ 110.0, 170.0 }, .{ 10.0, 10.0 }, .{ 180.0, 30.0 } },
+            .closed = false,
+            .fill = Color.Color32.TRANSPARENT,
+            .stroke = Stroke.NONE,
+        };
+        const bbox = curve.logicalBoundingRect();
+        try std.testing.expectApproxEqAbs(72.96, bbox.min[0], 0.01);
+        try std.testing.expectApproxEqAbs(27.78, bbox.min[1], 0.01);
+        try std.testing.expectApproxEqAbs(180.0, bbox.max[0], 0.01);
+        try std.testing.expectApproxEqAbs(170.0, bbox.max[1], 0.01);
+        var result = std.ArrayList(Pos2.T).init(std.testing.allocator);
+        defer result.deinit();
+
+        try result.append(curve.points[0]);
+
+        const callback = struct {
+            result: *std.ArrayList(Pos2.T),
+            fn run(self: @This(), pos: Pos2.T, t: f32) Allocator.Error!void {
+                _ = t;
+                try self.result.append(pos);
+            }
+        }{ .result = &result };
+        try curve.forEachFlattenedWithT(0.1, callback);
+
+        try std.testing.expectEqual(26, result.items.len);
+    }
+    {
+        const curve = QuadraticBezier{
+            .points = [3]Pos2.T{ .{ 110.0, 170.0 }, .{ 180.0, 30.0 }, .{ 10.0, 10.0 } },
+            .closed = false,
+            .fill = Color.Color32.TRANSPARENT,
+            .stroke = Stroke.NONE,
+        };
+        const bbox = curve.logicalBoundingRect();
+        try std.testing.expectApproxEqAbs(10.0, bbox.min[0], 0.01);
+        try std.testing.expectApproxEqAbs(10.0, bbox.min[1], 0.01);
+        try std.testing.expectApproxEqAbs(130.42, bbox.max[0], 0.01);
+        try std.testing.expectApproxEqAbs(170.0, bbox.max[1], 0.01);
+        var result = std.ArrayList(Pos2.T).init(std.testing.allocator);
+        defer result.deinit();
+
+        try result.append(curve.points[0]);
+
+        const callback = struct {
+            result: *std.ArrayList(Pos2.T),
+            fn run(self: @This(), pos: Pos2.T, t: f32) Allocator.Error!void {
+                _ = t;
+                try self.result.append(pos);
+            }
+        }{ .result = &result };
+        try curve.forEachFlattenedWithT(0.1, callback);
+
+        try std.testing.expectEqual(25, result.items.len);
+    }
+}
+
+test "quadratic different tolerance" {
+    const curve = QuadraticBezier{
+        .points = [3]Pos2.T{ .{ 110.0, 170.0 }, .{ 180.0, 30.0 }, .{ 10.0, 10.0 } },
+        .closed = false,
+        .fill = Color.Color32.TRANSPARENT,
+        .stroke = Stroke.NONE,
+    };
+    {
+        var result = std.ArrayList(Pos2.T).init(std.testing.allocator);
+        defer result.deinit();
+
+        try result.append(curve.points[0]);
+
+        const callback = struct {
+            result: *std.ArrayList(Pos2.T),
+            fn run(self: @This(), pos: Pos2.T, t: f32) Allocator.Error!void {
+                _ = t;
+                try self.result.append(pos);
+            }
+        }{ .result = &result };
+        try curve.forEachFlattenedWithT(1.0, callback);
+
+        try std.testing.expectEqual(9, result.items.len);
+    }
+    {
+        var result = std.ArrayList(Pos2.T).init(std.testing.allocator);
+        defer result.deinit();
+
+        try result.append(curve.points[0]);
+
+        const callback = struct {
+            result: *std.ArrayList(Pos2.T),
+            fn run(self: @This(), pos: Pos2.T, t: f32) Allocator.Error!void {
+                _ = t;
+                try self.result.append(pos);
+            }
+        }{ .result = &result };
+        try curve.forEachFlattenedWithT(0.1, callback);
+
+        try std.testing.expectEqual(25, result.items.len);
+    }
+    {
+        var result = std.ArrayList(Pos2.T).init(std.testing.allocator);
+        defer result.deinit();
+
+        try result.append(curve.points[0]);
+
+        const callback = struct {
+            result: *std.ArrayList(Pos2.T),
+            fn run(self: @This(), pos: Pos2.T, t: f32) Allocator.Error!void {
+                _ = t;
+                try self.result.append(pos);
+            }
+        }{ .result = &result };
+        try curve.forEachFlattenedWithT(0.01, callback);
+
+        try std.testing.expectEqual(77, result.items.len);
+    }
+    {
+        var result = std.ArrayList(Pos2.T).init(std.testing.allocator);
+        defer result.deinit();
+
+        try result.append(curve.points[0]);
+
+        const callback = struct {
+            result: *std.ArrayList(Pos2.T),
+            fn run(self: @This(), pos: Pos2.T, t: f32) Allocator.Error!void {
+                _ = t;
+                try self.result.append(pos);
+            }
+        }{ .result = &result };
+        try curve.forEachFlattenedWithT(0.001, callback);
+
+        try std.testing.expectEqual(240, result.items.len);
+    }
+}
+
+test "quadratic flattening" {
+    const curve = QuadraticBezier{
+        .points = [3]Pos2.T{ .{ 0.0, 0.0 }, .{ 80.0, 200.0 }, .{ 100.0, 30.0 } },
+        .closed = false,
+        .fill = Color.Color32.TRANSPARENT,
+        .stroke = Stroke.NONE,
+    };
+    {
+        var result = std.ArrayList(Pos2.T).init(std.testing.allocator);
+        defer result.deinit();
+
+        try result.append(curve.points[0]);
+
+        const callback = struct {
+            result: *std.ArrayList(Pos2.T),
+            fn run(self: @This(), pos: Pos2.T, t: f32) Allocator.Error!void {
+                _ = t;
+                try self.result.append(pos);
+            }
+        }{ .result = &result };
+        try curve.forEachFlattenedWithT(1.0, callback);
+
+        try std.testing.expectEqual(9, result.items.len);
+    }
+    {
+        var result = std.ArrayList(Pos2.T).init(std.testing.allocator);
+        defer result.deinit();
+
+        try result.append(curve.points[0]);
+
+        const callback = struct {
+            result: *std.ArrayList(Pos2.T),
+            fn run(self: @This(), pos: Pos2.T, t: f32) Allocator.Error!void {
+                _ = t;
+                try self.result.append(pos);
+            }
+        }{ .result = &result };
+        try curve.forEachFlattenedWithT(0.5, callback);
+
+        try std.testing.expectEqual(11, result.items.len);
+    }
+    {
+        var result = std.ArrayList(Pos2.T).init(std.testing.allocator);
+        defer result.deinit();
+
+        try result.append(curve.points[0]);
+
+        const callback = struct {
+            result: *std.ArrayList(Pos2.T),
+            fn run(self: @This(), pos: Pos2.T, t: f32) Allocator.Error!void {
+                _ = t;
+                try self.result.append(pos);
+            }
+        }{ .result = &result };
+        try curve.forEachFlattenedWithT(0.1, callback);
+
+        try std.testing.expectEqual(24, result.items.len);
+    }
+    {
+        var result = std.ArrayList(Pos2.T).init(std.testing.allocator);
+        defer result.deinit();
+
+        try result.append(curve.points[0]);
+
+        const callback = struct {
+            result: *std.ArrayList(Pos2.T),
+            fn run(self: @This(), pos: Pos2.T, t: f32) Allocator.Error!void {
+                _ = t;
+                try self.result.append(pos);
+            }
+        }{ .result = &result };
+        try curve.forEachFlattenedWithT(0.01, callback);
+
+        try std.testing.expectEqual(72, result.items.len);
+    }
+    {
+        var result = std.ArrayList(Pos2.T).init(std.testing.allocator);
+        defer result.deinit();
+
+        try result.append(curve.points[0]);
+
+        const callback = struct {
+            result: *std.ArrayList(Pos2.T),
+            fn run(self: @This(), pos: Pos2.T, t: f32) Allocator.Error!void {
+                _ = t;
+                try self.result.append(pos);
+            }
+        }{ .result = &result };
+        try curve.forEachFlattenedWithT(0.001, callback);
+
+        try std.testing.expectEqual(223, result.items.len);
+    }
+}
+
 // ----------------------------------------------------------------------------
 
 /// A cubic [Bézier Curve](https://en.wikipedia.org/wiki/B%C3%A9zier_curve).
