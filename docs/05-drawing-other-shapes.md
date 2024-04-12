@@ -159,3 +159,8 @@ for (1..count) |index| {
 it may panic with integer overflow if upper bound `count` is smaller than lower bound `1`.
 We fixed the code by wrapping the whole for loop in `if` ensuring that `count` is at least `1`.
 Unfortunately similar problems may lurk elsewhere.
+
+## Line segment
+
+In `epaint` line segment does not have dedicated struct.
+But we create one for consistency.

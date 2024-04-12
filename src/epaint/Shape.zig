@@ -91,6 +91,10 @@ pub const Ellipse = struct {
 
 // ----------------------------------------------------------------------------
 
+pub const LineSegment = struct { points: [2]Pos2.T, stroke: Stroke.T };
+
+// ----------------------------------------------------------------------------
+
 // TODO: Consider whether `Path.points` should be slice instead of array list.
 
 /// A path which can be stroked and/or filled (if closed).

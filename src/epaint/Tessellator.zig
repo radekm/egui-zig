@@ -1191,16 +1191,16 @@ pub const T = struct {
     ///
     /// * `shape`: the mesh to tessellate.
     /// * `out`: triangles are appended to this.
-    pub fn tessellateLine(self: *T, points: [2]Pos2.T, stroke: Stroke.T, out: *Mesh.T) Allocator.Error!void {
-        if (stroke.isEmpty())
+    pub fn tessellateLine(self: *T, line: Shape.LineSegment, out: *Mesh.T) Allocator.Error!void {
+        if (line.stroke.isEmpty())
             return;
         if (self.options.coarse_tessellation_culling and
-            !self.clip_rect.intersects(Rect.fromTwoPos(points[0], points[1]).expand(stroke.width)))
+            !self.clip_rect.intersects(Rect.fromTwoPos(line.points[0], line.points[1]).expand(line.stroke.width)))
             return;
 
         self.scratchpad_path.clear();
-        try self.scratchpad_path.addLineSegment(points);
-        try self.scratchpad_path.strokeOpen(self.feathering, stroke, out);
+        try self.scratchpad_path.addLineSegment(line.points);
+        try self.scratchpad_path.strokeOpen(self.feathering, line.stroke, out);
     }
 
     /// Tessellate a single [`PathShape`] into a [`Mesh`].
@@ -1279,22 +1279,22 @@ pub const T = struct {
             // Very thin - approximate by a vertical line-segment:
             const line = [_]Pos2.T{ rect.centerTop(), rect.centerBottom() };
             if (!fill.eql(Color.Color32.TRANSPARENT)) {
-                try self.tessellateLine(line, .{ .width = rect.width(), .color = fill }, out);
+                try self.tessellateLine(.{ .points = line, .stroke = .{ .width = rect.width(), .color = fill } }, out);
             }
             if (!stroke.isEmpty()) {
-                try self.tessellateLine(line, stroke, out); // back…
-                try self.tessellateLine(line, stroke, out); // …and forth
+                try self.tessellateLine(.{ .points = line, .stroke = stroke }, out); // back…
+                try self.tessellateLine(.{ .points = line, .stroke = stroke }, out); // …and forth
 
             }
         } else if (rect.height() < self.feathering) {
             // Very thin - approximate by a horizontal line-segment:
             const line = [_]Pos2.T{ rect.leftCenter(), rect.rightCenter() };
             if (!fill.eql(Color.Color32.TRANSPARENT)) {
-                try self.tessellateLine(line, .{ .width = rect.height(), .color = fill }, out);
+                try self.tessellateLine(.{ .points = line, .stroke = .{ .width = rect.height(), .color = fill } }, out);
             }
             if (!stroke.isEmpty()) {
-                try self.tessellateLine(line, stroke, out); // back…
-                try self.tessellateLine(line, stroke, out); // …and forth
+                try self.tessellateLine(.{ .points = line, .stroke = stroke }, out); // back…
+                try self.tessellateLine(.{ .points = line, .stroke = stroke }, out); // …and forth
 
             }
         } else {
